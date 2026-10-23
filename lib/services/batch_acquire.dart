@@ -113,7 +113,7 @@ Future<void> _acquireGroup({
       sawMissing = true;
       continue;
     }
-    if (!canGhostFilename(link.filename)) {
+    if (!canGhostRelease(filename: link.filename, format: link.format)) {
       sawArchive = true;
       continue;
     }
@@ -168,7 +168,7 @@ Future<void> _acquireOne({
     report.missing++;
     return;
   }
-  if (ghost && !canGhostFilename(link.filename)) {
+  if (ghost && !canGhostRelease(filename: link.filename, format: link.format)) {
     report.skippedArchives++;
     return;
   }

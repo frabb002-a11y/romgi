@@ -236,9 +236,10 @@ class DownloadService {
     return (AddDownloadResult.added, downloadTask);
   }
 
-  /// Writes a 0-byte file with [link]'s own filename and records it as a
-  /// completed download. Archives are refused. An existing file that already
-  /// has data is left alone.
+  /// Writes a 0-byte file named from [link]'s file-type tag and records it
+  /// as a completed download. The stored link keeps its original filename
+  /// so a later install still downloads that source. An existing file that
+  /// already has data is left alone.
   Future<(AddDownloadResult, DownloadTask?)> createGhost({
     required String slug,
     required String title,
@@ -250,7 +251,10 @@ class DownloadService {
     String? groupTitle,
     int? groupTotal,
   }) async {
-    if (!canGhostFilename(link.filename)) {
+    final ghostName = ghostFilename(filename: link.filename, format: link.format);
+    if (!canGhostRelease(filename: link.filename, format: link.format) ||
+        ghostName.isEmpty ||
+        isArchiveFilename(ghostName)) {
       return (AddDownloadResult.duplicate, null);
     }
 
@@ -259,7 +263,7 @@ class DownloadService {
       return (AddDownloadResult.duplicate, existingDownload);
     }
 
-    final downloadPath = await _storage.getDownloadPath(platform, link.filename);
+    final downloadPath = await _storage.getDownloadPath(platform, ghostName);
     final file = File(downloadPath);
     if (await file.exists()) {
       if (await file.length() > 0) {

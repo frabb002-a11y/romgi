@@ -1082,7 +1082,7 @@ class _DownloadLinkCard extends ConsumerWidget {
   Future<void> _offerAcquire(BuildContext context, WidgetRef ref) async {
     if (!context.mounted) return;
 
-    if (canGhostFilename(link.filename)) {
+    if (canGhostRelease(filename: link.filename, format: link.format)) {
       final mode = await showAcquireModeDialog(context, count: 1);
       if (mode == null || !context.mounted) return;
       if (mode == AcquireMode.ghost) {
