@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'providers/providers.dart';
 import 'screens/screens.dart';
+import 'widgets/moby_browser_host.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,7 +75,15 @@ class _AppHome extends ConsumerWidget {
         onComplete: () => ref.invalidate(databaseReadyProvider),
       ),
       data: (isReady) => isReady
-          ? const WithForegroundTask(child: MainNavigation())
+          ? const WithForegroundTask(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  MainNavigation(),
+                  MobyBrowserHost(),
+                ],
+              ),
+            )
           : DatabaseSetupScreen(
               onComplete: () => ref.invalidate(databaseReadyProvider),
             ),

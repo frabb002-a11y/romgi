@@ -34,6 +34,17 @@ void main() {
     expect(mobyTitleKey('The Legend of Zelda (USA) [!]'), 'legend of zelda');
   });
 
+  test('a Cloudflare check page counts as blocked', () {
+    expect(
+      mobyPageLooksBlocked('<html><title>Just a moment...</title></html>'),
+      isTrue,
+    );
+    expect(
+      mobyPageLooksBlocked('<a href="/game/1/alpha/">Alpha</a>'),
+      isFalse,
+    );
+  });
+
   test('archives cannot be ghosted and a normal rom filename can', () {
     expect(canGhostFilename('Game.nds'), isTrue);
     expect(canGhostFilename('Game.iso'), isTrue);

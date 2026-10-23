@@ -34,8 +34,9 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: Text(
             'Builds a local score list from public MobyGames pages, one page '
-            'per second. Pick a platform when you want it. Browse only filters '
-            'platforms whose build has finished.',
+            'per second. The first page may ask for a browser check. Pick a '
+            'platform when you want it. Browse only filters platforms whose '
+            'build has finished.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ),

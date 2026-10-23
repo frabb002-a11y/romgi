@@ -90,13 +90,27 @@ bool mobyPageLooksBlocked(String html) {
   return lower.contains('just a moment') ||
       lower.contains('cf-challenge') ||
       lower.contains('challenge-platform') ||
-      lower.contains('cf-browser-verification');
+      lower.contains('cf-browser-verification') ||
+      lower.contains('cf-mitigated');
+}
+
+/// Loads a MobyGames URL in the app browser. Set by [MobyBrowserHost]
+/// while the app is on screen. The site answers plain requests with a
+/// Cloudflare check, and that check has to run in a real page.
+typedef MobyBrowserLoad = Future<String> Function(
+  String url, {
+  CancelToken? cancelToken,
+});
+
+class MobyBrowser {
+  static MobyBrowserLoad? load;
 }
 
 class MobyPageClient {
   MobyPageClient({Dio? dio}) : _dio = dio ?? _createDio();
 
   final Dio _dio;
+  var _preferBrowser = false;
 
   static Dio _createDio() {
     final dio = Dio(
@@ -124,6 +138,9 @@ class MobyPageClient {
   }) async {
     final base = 'https://www.mobygames.com/platform/$slug/';
     final url = page <= 0 ? base : '${base}page:$page/';
+    if (_preferBrowser) {
+      return _loadInBrowser(url, cancelToken);
+    }
     for (var attempt = 0; attempt < 3; attempt++) {
       final response = await _dio.get<String>(url, cancelToken: cancelToken);
       final code = response.statusCode ?? 0;
@@ -131,19 +148,28 @@ class MobyPageClient {
         await Future<void>.delayed(const Duration(seconds: 5));
         continue;
       }
+      final html = response.data ?? '';
+      if (code == 403 || code == 503 || mobyPageLooksBlocked(html)) {
+        return _loadInBrowser(url, cancelToken);
+      }
       if (code != 200) {
         throw MobyPageException('MobyGames returned HTTP $code.');
-      }
-      final html = response.data ?? '';
-      if (mobyPageLooksBlocked(html)) {
-        throw const MobyPageException(
-          'MobyGames blocked the request. Try again in a little while.',
-        );
       }
       return html;
     }
     throw const MobyPageException(
       'MobyGames is rate limiting requests. Try again in a little while.',
     );
+  }
+
+  Future<String> _loadInBrowser(String url, CancelToken? cancelToken) {
+    final load = MobyBrowser.load;
+    if (load == null) {
+      throw const MobyPageException(
+        'MobyGames asked for a browser check. Open Romgi and start the build again.',
+      );
+    }
+    _preferBrowser = true;
+    return load(url, cancelToken: cancelToken);
   }
 }
