@@ -8,13 +8,19 @@ import 'retro_achievements_badge.dart';
 class RomGridCard extends StatelessWidget {
   final RomEntry entry;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final bool isDownloaded;
+  final bool selected;
+  final double? score;
 
   const RomGridCard({
     super.key,
     required this.entry,
     this.onTap,
+    this.onLongPress,
     this.isDownloaded = false,
+    this.selected = false,
+    this.score,
   });
 
   @override
@@ -23,6 +29,7 @@ class RomGridCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -76,6 +83,46 @@ class RomGridCard extends StatelessWidget {
                           Icons.download_done,
                           size: 14,
                           color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  if (selected)
+                    Positioned(
+                      bottom: 4,
+                      right: 4,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.check,
+                          size: 14,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                        ),
+                      ),
+                    ),
+                  if (score != null)
+                    Positioned(
+                      bottom: 4,
+                      left: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          score!.toStringAsFixed(1),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ),

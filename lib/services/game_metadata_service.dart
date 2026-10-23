@@ -70,6 +70,9 @@ class GameMetadataService {
     _loadedIds.add(providerId);
   }
 
+  Future<Map<String, String>?> readCredentials(String providerId) =>
+      _readCreds(providerId);
+
   Future<bool> isConfigured(String providerId) async {
     final provider = _registry.byId(providerId);
     if (provider == null) return false;
@@ -78,6 +81,7 @@ class GameMetadataService {
 
   Future<bool> anyConfigured() async {
     for (final provider in _registry.providers) {
+      if (!provider.suppliesDescriptions) continue;
       if (await isConfigured(provider.info.id)) return true;
     }
     return false;
@@ -100,6 +104,7 @@ class GameMetadataService {
   Future<GameMetadata?> getMetadata(RomEntry entry) async {
     final configured = <GameMetadataProvider, Map<String, String>>{};
     for (final provider in _registry.providers) {
+      if (!provider.suppliesDescriptions) continue;
       final creds = await _readCreds(provider.info.id);
       if (provider.isConfigured(creds)) configured[provider] = creds!;
     }

@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../providers/providers.dart';
+import '../services/batch_acquire.dart';
 import '../services/download_service.dart';
 import '../services/link_resolver.dart';
 import '../utils/utils.dart';
+import '../widgets/acquire_mode_dialog.dart';
 import '../widgets/widgets.dart';
 import 'internet_archive_login_screen.dart';
 
@@ -28,15 +30,6 @@ final entryGroupProvider = FutureProvider.family<EntryGroup?, String>((
 
   return db.getEntryGroup(slug);
 });
-
-// Mirror of source.yml priority values. Replaced when the SourcesService
-// surfaces the live manifest table.
-const Map<String, int> kKnownSourcePriority = {
-  'minerva': 200,
-  'nopaystation': 80,
-  'mariocube': 70,
-  'internet_archive': 50,
-};
 
 class EntryDetailScreen extends ConsumerWidget {
   final String slug;
@@ -510,6 +503,45 @@ class _DiscGroupSection extends ConsumerWidget {
   }
 
   Future<void> _downloadAll(BuildContext context, WidgetRef ref) async {
+    final mode = await showAcquireModeDialog(
+      context,
+      count: group.members.length,
+    );
+    if (mode == null || !context.mounted) return;
+    if (mode == AcquireMode.ghost) {
+      final iaLoggedIn = await ref.read(iaLoggedInProvider.future);
+      final base = ref.read(downloadServiceProvider).getLinkResolverPrefs();
+      final report = await acquireSelection(
+        slugs: group.members.map((member) => member.slug).toList(),
+        ghost: true,
+        db: ref.read(romDatabaseProvider),
+        downloads: ref.read(downloadServiceProvider),
+        prefs: LinkResolverPrefs(
+          disabledSourceIds: base.disabledSourceIds,
+          preferredSourceIds: base.preferredSourceIds,
+          isIaLoggedIn: iaLoggedIn,
+          torrentsDisabled: base.torrentsDisabled,
+          debridEnabled: base.debridEnabled,
+        ),
+      );
+      if (!context.mounted) return;
+      final parts = <String>[];
+      if (report.ghosts > 0) parts.add('${report.ghosts} ghost files');
+      if (report.skippedArchives > 0) {
+        parts.add('${report.skippedArchives} archives skipped');
+      }
+      if (report.duplicates > 0) {
+        parts.add('${report.duplicates} already added');
+      }
+      if (report.missing > 0) parts.add('${report.missing} unavailable');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(parts.isEmpty ? 'Nothing to add' : parts.join(', ')),
+        ),
+      );
+      return;
+    }
+
     final iaLoggedIn = await ref.read(iaLoggedInProvider.future);
     if (!context.mounted) return;
     final torrentsDisabled = ref.read(settingsProvider).torrentsDisabled;
@@ -1034,7 +1066,7 @@ class _DownloadLinkCard extends ConsumerWidget {
           // If login was successful, proceed with download
           if (loggedIn == true && context.mounted) {
             ref.invalidate(iaLoggedInProvider);
-            _addToDownloadQueue(context, ref);
+            await _offerAcquire(context, ref);
           }
           return;
         } else {
@@ -1043,10 +1075,56 @@ class _DownloadLinkCard extends ConsumerWidget {
       }
     }
 
-    // Proceed with download
+    if (!context.mounted) return;
+    await _offerAcquire(context, ref);
+  }
+
+  Future<void> _offerAcquire(BuildContext context, WidgetRef ref) async {
     if (!context.mounted) return;
 
+    if (canGhostFilename(link.filename)) {
+      final mode = await showAcquireModeDialog(context, count: 1);
+      if (mode == null || !context.mounted) return;
+      if (mode == AcquireMode.ghost) {
+        await _addGhost(context, ref);
+        return;
+      }
+    }
+
     _addToDownloadQueue(context, ref);
+  }
+
+  Future<void> _addGhost(BuildContext context, WidgetRef ref) async {
+    final (result, existingTask) = await ref
+        .read(downloadProvider.notifier)
+        .createGhost(
+          slug: entry.slug,
+          title: entry.title,
+          platform: entry.platform,
+          boxartUrl: entry.boxartUrl,
+          link: link,
+        );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    if (result == AddDownloadResult.duplicate) {
+      final statusMsg = existingTask == null
+          ? 'already on disk'
+          : switch (existingTask.status) {
+              DownloadStatus.completed => 'already in the library',
+              DownloadStatus.downloading ||
+              DownloadStatus.extracting => 'currently downloading',
+              DownloadStatus.pending => 'already in queue',
+              DownloadStatus.paused => 'paused in queue',
+              DownloadStatus.failed => 'in queue',
+            };
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('"${entry.title}" is $statusMsg')),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added a ghost file for "${entry.title}"')),
+    );
   }
 
   Future<void> _addToDownloadQueue(BuildContext context, WidgetRef ref) async {

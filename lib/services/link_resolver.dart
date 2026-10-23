@@ -1,5 +1,14 @@
 import '../models/download_link.dart';
 
+// Mirror of source.yml priority values. Replaced when the SourcesService
+// surfaces the live manifest table.
+const Map<String, int> kKnownSourcePriority = {
+  'minerva': 200,
+  'nopaystation': 80,
+  'mariocube': 70,
+  'internet_archive': 50,
+};
+
 class LinkResolverPrefs {
   final Set<String> disabledSourceIds;
   final Set<String> preferredSourceIds;

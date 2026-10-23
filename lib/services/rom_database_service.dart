@@ -336,6 +336,60 @@ class RomDatabaseService {
   String get _raSelectColumns =>
       _hasRaColumns ? ', e.ra_game_id, e.ra_num_achievements' : '';
 
+  ({String where, List<Object?> params}) _searchClause({
+    String? query,
+    List<String>? platforms,
+    List<String>? regions,
+    bool retroAchievementsOnly = false,
+  }) {
+    final params = <Object?>[];
+    final conditions = <String>[];
+
+    if (query != null && query.isNotEmpty) {
+      for (final word in query.toLowerCase().split(RegExp(r'\s+'))) {
+        final cleaned = word.replaceAll(RegExp(r'[^\w\d]'), '');
+        if (cleaned.isEmpty) continue;
+        conditions.add('LOWER(e.title) LIKE ?');
+        params.add('%$cleaned%');
+      }
+    }
+
+    if (platforms != null && platforms.isNotEmpty) {
+      conditions.add('e.platform IN (${platforms.map((_) => '?').join(',')})');
+      params.addAll(platforms);
+    }
+
+    if (regions != null && regions.isNotEmpty) {
+      conditions.add('re.region IN (${regions.map((_) => '?').join(',')})');
+      params.addAll(regions);
+    }
+
+    if (retroAchievementsOnly && _hasRaColumns) {
+      conditions.add('e.ra_game_id IS NOT NULL');
+    }
+
+    final where =
+        conditions.isEmpty ? '' : 'WHERE ${conditions.join(' AND ')}';
+    return (where: where, params: params);
+  }
+
+  String get _searchFrom => '''
+    FROM entries e
+    LEFT JOIN regions_entries re ON re.entry = e.slug
+    LEFT JOIN regions r ON r.id = re.region
+  ''';
+
+  Future<int> _countMatches(
+    Database db,
+    ({String where, List<Object?> params}) clause,
+  ) async {
+    final rows = await db.rawQuery(
+      'SELECT COUNT(DISTINCT e.slug) AS n $_searchFrom ${clause.where}',
+      clause.params,
+    );
+    return (rows.first['n'] as int?) ?? 0;
+  }
+
   Future<SearchResult> search({
     String? query,
     List<String>? platforms,
@@ -346,128 +400,81 @@ class RomDatabaseService {
   }) async {
     final db = await database;
     final offset = (page - 1) * maxResults;
-    final params = <dynamic>[];
-    var whereClause = '';
+    final clause = _searchClause(
+      query: query,
+      platforms: platforms,
+      regions: regions,
+      retroAchievementsOnly: retroAchievementsOnly,
+    );
+    final total = await _countMatches(db, clause);
+    final rows = await db.rawQuery(
+      '''
+      SELECT DISTINCT e.slug, e.rom_id, e.title, e.platform, e.boxart_url
+             $_raSelectColumns,
+             GROUP_CONCAT(DISTINCT r.name) as region_names
+      $_searchFrom
+      ${clause.where}
+      GROUP BY e.slug
+      ORDER BY e.title
+      LIMIT ? OFFSET ?
+      ''',
+      [...clause.params, maxResults, offset],
+    );
+    final entries = await _mapResultsToEntries(db, rows);
+    final totalPages = total == 0 ? 1 : (total / maxResults).ceil();
 
-    if (query != null && query.isNotEmpty) {
-      var searchSql = '''
-        SELECT DISTINCT e.slug, e.rom_id, e.title, e.platform, e.boxart_url
-               $_raSelectColumns,
-               GROUP_CONCAT(DISTINCT r.name) as region_names
-        FROM entries e
-        LEFT JOIN regions_entries re ON re.entry = e.slug
-        LEFT JOIN regions r ON r.id = re.region
-      ''';
+    return SearchResult(
+      entries: entries,
+      totalResults: total,
+      currentPage: page,
+      totalPages: totalPages,
+      currentResults: entries.length,
+    );
+  }
 
-      final words = query.toLowerCase().split(RegExp(r'\s+'));
-      final likeConditions = <String>[];
-      for (final word in words) {
-        final cleaned = word.replaceAll(RegExp(r'[^\w\d]'), '');
-        if (cleaned.isEmpty) continue;
-        likeConditions.add("LOWER(e.title) LIKE '%$cleaned%'");
-      }
+  /// Every match for the current filters, without download links.
+  /// Used when a score filter has to see the whole set before paging.
+  Future<List<RomEntry>> listMatches({
+    String? query,
+    List<String>? platforms,
+    List<String>? regions,
+    bool retroAchievementsOnly = false,
+  }) async {
+    final db = await database;
+    final clause = _searchClause(
+      query: query,
+      platforms: platforms,
+      regions: regions,
+      retroAchievementsOnly: retroAchievementsOnly,
+    );
+    final rows = await db.rawQuery(
+      '''
+      SELECT DISTINCT e.slug, e.rom_id, e.title, e.platform, e.boxart_url
+             $_raSelectColumns,
+             GROUP_CONCAT(DISTINCT r.name) as region_names
+      $_searchFrom
+      ${clause.where}
+      GROUP BY e.slug
+      ORDER BY e.title
+      ''',
+      clause.params,
+    );
+    return _mapResultsToEntries(db, rows);
+  }
 
-      final allConditions = [...likeConditions];
-
-      if (platforms != null && platforms.isNotEmpty) {
-        final placeholders = platforms.map((_) => '?').join(',');
-        allConditions.add('e.platform IN ($placeholders)');
-        params.addAll(platforms);
-      }
-
-      if (regions != null && regions.isNotEmpty) {
-        final placeholders = regions.map((_) => '?').join(',');
-        allConditions.add('re.region IN ($placeholders)');
-        params.addAll(regions);
-      }
-
-      if (retroAchievementsOnly && _hasRaColumns) {
-        allConditions.add('e.ra_game_id IS NOT NULL');
-      }
-
-      if (allConditions.isNotEmpty) {
-        whereClause = 'WHERE ${allConditions.join(' AND ')}';
-      }
-
-      searchSql += '''
-        $whereClause
-        GROUP BY e.slug
-        ORDER BY e.title
-        LIMIT ? OFFSET ?
-      ''';
-      params.addAll([maxResults + 1, offset]);
-
-      final results = await db.rawQuery(searchSql, params);
-      final hasMore = results.length > maxResults;
-      final limitedResults = hasMore ? results.sublist(0, maxResults) : results;
-      final entries = await _mapResultsToEntries(db, limitedResults);
-
-      final estimatedTotal = hasMore ? offset + maxResults + 1 : offset + entries.length;
-      final estimatedPages = (estimatedTotal / maxResults).ceil();
-
-      return SearchResult(
-        entries: entries,
-        totalResults: estimatedTotal,
-        currentPage: page,
-        totalPages: estimatedPages > 0 ? estimatedPages : 1,
-        currentResults: entries.length,
-      );
-    } else {
-      var searchSql = '''
-        SELECT DISTINCT e.slug, e.rom_id, e.title, e.platform, e.boxart_url
-               $_raSelectColumns,
-               GROUP_CONCAT(DISTINCT r.name) as region_names
-        FROM entries e
-        LEFT JOIN regions_entries re ON re.entry = e.slug
-        LEFT JOIN regions r ON r.id = re.region
-      ''';
-
-      final conditions = <String>[];
-
-      if (platforms != null && platforms.isNotEmpty) {
-        final placeholders = platforms.map((_) => '?').join(',');
-        conditions.add('e.platform IN ($placeholders)');
-        params.addAll(platforms);
-      }
-
-      if (regions != null && regions.isNotEmpty) {
-        final placeholders = regions.map((_) => '?').join(',');
-        conditions.add('re.region IN ($placeholders)');
-        params.addAll(regions);
-      }
-
-      if (retroAchievementsOnly && _hasRaColumns) {
-        conditions.add('e.ra_game_id IS NOT NULL');
-      }
-
-      if (conditions.isNotEmpty) {
-        whereClause = 'WHERE ${conditions.join(' AND ')}';
-      }
-
-      searchSql += '''
-        $whereClause
-        GROUP BY e.slug
-        ORDER BY e.title
-        LIMIT ? OFFSET ?
-      ''';
-      params.addAll([maxResults + 1, offset]);
-
-      final results = await db.rawQuery(searchSql, params);
-      final hasMore = results.length > maxResults;
-      final limitedResults = hasMore ? results.sublist(0, maxResults) : results;
-      final entries = await _mapResultsToEntries(db, limitedResults);
-
-      final estimatedTotal = hasMore ? offset + maxResults + 1 : offset + entries.length;
-      final estimatedPages = (estimatedTotal / maxResults).ceil();
-
-      return SearchResult(
-        entries: entries,
-        totalResults: estimatedTotal,
-        currentPage: page,
-        totalPages: estimatedPages > 0 ? estimatedPages : 1,
-        currentResults: entries.length,
-      );
-    }
+  Future<List<String>> listMatchingSlugs({
+    String? query,
+    List<String>? platforms,
+    List<String>? regions,
+    bool retroAchievementsOnly = false,
+  }) async {
+    final matches = await listMatches(
+      query: query,
+      platforms: platforms,
+      regions: regions,
+      retroAchievementsOnly: retroAchievementsOnly,
+    );
+    return matches.map((entry) => entry.slug).toList();
   }
 
   Future<RomEntry?> getEntry(String slug) async {

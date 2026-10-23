@@ -210,6 +210,30 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
     );
   }
 
+  Future<(AddDownloadResult, DownloadTask?)> createGhost({
+    required String slug,
+    required String title,
+    required String platform,
+    String? boxartUrl,
+    required DownloadLink link,
+    String? groupId,
+    int? groupIndex,
+    String? groupTitle,
+    int? groupTotal,
+  }) {
+    return _service.createGhost(
+      slug: slug,
+      title: title,
+      platform: platform,
+      boxartUrl: boxartUrl,
+      link: link,
+      groupId: groupId,
+      groupIndex: groupIndex,
+      groupTitle: groupTitle,
+      groupTotal: groupTotal,
+    );
+  }
+
   Future<(AddDownloadResult, DownloadTask)> addDownload({
     required String slug,
     required String title,

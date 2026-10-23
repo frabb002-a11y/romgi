@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../providers/providers.dart';
+import '../services/download_service.dart';
 import '../utils/utils.dart';
 import 'entry_detail_screen.dart';
 
@@ -26,11 +27,17 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   final _searchController = TextEditingController();
   bool _showSearch = false;
   late TabController _tabController;
+  final Set<String> _selectedPaths = {};
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (_selectedPaths.isNotEmpty && mounted) {
+        setState(_selectedPaths.clear);
+      }
+    });
   }
 
   @override
@@ -45,7 +52,30 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     final libraryState = ref.watch(libraryProvider);
     final favoritesAsync = ref.watch(favoritesProvider);
 
+    final selecting = _selectedPaths.isNotEmpty && _tabController.index != 2;
+
     return Scaffold(
+      bottomNavigationBar: selecting
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: Row(
+                  children: [
+                    Text('${_selectedPaths.length} selected'),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => setState(_selectedPaths.clear),
+                      child: const Text('Clear'),
+                    ),
+                    FilledButton(
+                      onPressed: _manageSelection,
+                      child: const Text('Manage'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
       appBar: AppBar(
         title: _showSearch
             ? TextField(
@@ -144,7 +174,17 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                 children: [
                   const Icon(Icons.folder, size: 18),
                   const SizedBox(width: 8),
-                  Text('Downloaded (${libraryState.items.length})'),
+                  Text('Downloaded (${libraryState.realEntries.length})'),
+                ],
+              ),
+            ),
+            Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.cloud_outlined, size: 18),
+                  const SizedBox(width: 8),
+                  Text('Ghosts (${libraryState.ghostEntries.length})'),
                 ],
               ),
             ),
@@ -164,20 +204,22 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
-          // Downloaded tab
-          _buildDownloadedTab(libraryState),
-          // Wishlist tab
+          _buildFileTab(libraryState, ghosts: false),
+          _buildFileTab(libraryState, ghosts: true),
           _buildWishlistTab(favoritesAsync),
         ],
       ),
     );
   }
 
-  Widget _buildDownloadedTab(LibraryState libraryState) {
+  Widget _buildFileTab(LibraryState libraryState, {required bool ghosts}) {
+    final items = libraryState.filtered(ghosts: ghosts);
+    final platforms = libraryState.platformsFor(ghosts: ghosts);
+    final selecting = _selectedPaths.isNotEmpty;
     return Column(
       children: [
         // Platform filter chips
-        if (libraryState.platforms.isNotEmpty)
+        if (platforms.isNotEmpty)
           Container(
             height: 50,
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -195,7 +237,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                   },
                 ),
                 const SizedBox(width: 8),
-                ...libraryState.platforms.map((platform) {
+                ...platforms.map((platform) {
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: FilterChip(
@@ -221,20 +263,32 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
         Expanded(
           child: libraryState.isLoading
               ? const Center(child: CircularProgressIndicator())
-              : libraryState.filteredItems.isEmpty
-              ? _buildEmptyState(libraryState)
+              : items.isEmpty
+              ? _buildEmptyState(libraryState, ghosts: ghosts)
               : RefreshIndicator(
                   onRefresh: () => ref.read(libraryProvider.notifier).refresh(),
                   child: ListView.builder(
-                    itemCount: libraryState.filteredItems.length,
+                    itemCount: items.length,
                     itemBuilder: (context, index) {
-                      final item = libraryState.filteredItems[index];
-                      final fileExists = libraryState.fileExists(item.filePath);
+                      final item = items[index];
+                      final filePath = item.path;
+                      final selected =
+                          filePath != null && _selectedPaths.contains(filePath);
                       return _LibraryItemTile(
                         item: item,
-                        fileExists: fileExists,
-                        onTap: () => _openFile(item),
-                        onDelete: () => _confirmDelete(item),
+                        selected: selected,
+                        selecting: selecting,
+                        onTap: () {
+                          if (selecting && filePath != null) {
+                            _togglePath(filePath);
+                          } else {
+                            _openFile(item.task);
+                          }
+                        },
+                        onLongPress: filePath == null
+                            ? null
+                            : () => _togglePath(filePath),
+                        onManage: () => _manage([item]),
                       );
                     },
                   ),
@@ -314,7 +368,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     );
   }
 
-  Widget _buildEmptyState(LibraryState state) {
+  Widget _buildEmptyState(LibraryState state, {required bool ghosts}) {
     if (state.searchQuery.isNotEmpty) {
       return Center(
         child: Column(
@@ -354,12 +408,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
           Icon(Icons.library_books, size: 64, color: Colors.grey[400]),
           const SizedBox(height: 16),
           Text(
-            'Your library is empty',
+            ghosts ? 'No ghost files yet' : 'Your library is empty',
             style: TextStyle(color: Colors.grey[600], fontSize: 18),
           ),
           const SizedBox(height: 8),
           Text(
-            'Downloaded ROMs will appear here',
+            ghosts
+                ? 'Ghost files from Browse will appear here'
+                : 'Downloaded ROMs will appear here',
             style: TextStyle(color: Colors.grey[500]),
           ),
         ],
@@ -375,8 +431,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
       return;
     }
 
-    final file = File(item.filePath!);
-    if (!await file.exists()) {
+    final type = await FileSystemEntity.type(
+      item.filePath!,
+      followLinks: false,
+    );
+    if (type == FileSystemEntityType.notFound) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -461,12 +520,38 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     );
   }
 
-  Future<void> _confirmDelete(DownloadTask item) async {
+  void _togglePath(String filePath) {
+    setState(() {
+      if (!_selectedPaths.add(filePath)) _selectedPaths.remove(filePath);
+    });
+  }
+
+  Future<void> _manageSelection() async {
+    final ghosts = _tabController.index == 1;
+    final items = ref
+        .read(libraryProvider)
+        .filtered(ghosts: ghosts)
+        .where(
+          (entry) =>
+              entry.path != null && _selectedPaths.contains(entry.path),
+        )
+        .toList();
+    if (items.isEmpty) return;
+    await _manage(items);
+  }
+
+  Future<void> _manage(List<LibraryEntry> items) async {
+    final canConvert = items.any((entry) => entry.canConvert);
+    final canInstall = items.any((entry) => entry.canInstall);
+    final allGhosts = items.every((entry) => entry.ghost);
+    final title = items.length == 1
+        ? items.first.task.title
+        : '${items.length} files';
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete ROM'),
-        content: Text('Delete "${item.title}"?'),
+        title: const Text('Manage'),
+        content: Text(title),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, 'cancel'),
@@ -474,73 +559,105 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, 'remove'),
-            child: const Text('Remove from Library'),
+            child: Text(
+              allGhosts ? 'Remove from ghost library' : 'Remove from library',
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, 'delete'),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete File'),
+            child: const Text('Delete file'),
           ),
+          if (canConvert)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'convert'),
+              child: const Text('Convert to ghost'),
+            ),
+          if (canInstall)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'install'),
+              child: const Text('Install game data'),
+            ),
         ],
       ),
     );
+    if (result == null || result == 'cancel' || !mounted) return;
 
+    final notifier = ref.read(libraryProvider.notifier);
+    var message = '';
     if (result == 'remove') {
-      await ref
-          .read(libraryProvider.notifier)
-          .deleteItem(item, deleteFile: false);
-
-      // Invalidate download status providers so search results update
-      ref.invalidate(downloadedSlugsProvider);
-
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Removed from library')));
-      }
+      await notifier.removeFromLibrary(items);
+      message = 'Removed from library';
     } else if (result == 'delete') {
-      await ref
-          .read(libraryProvider.notifier)
-          .deleteItem(item, deleteFile: true);
-
-      // Invalidate download status providers so search results update
-      ref.invalidate(downloadedSlugsProvider);
-
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('ROM deleted')));
+      await notifier.deleteFiles(items);
+      message = 'File deleted';
+    } else if (result == 'convert') {
+      final converted = await notifier.convertToGhosts(items);
+      message = converted == 1
+          ? 'Converted to a ghost file'
+          : 'Converted $converted files to ghosts';
+    } else if (result == 'install') {
+      final ready = await notifier.prepareInstall(items);
+      var queued = 0;
+      for (final item in ready) {
+        final (downloadResult, _) = await ref
+            .read(downloadProvider.notifier)
+            .addDownload(
+              slug: item.task.slug,
+              title: item.task.title,
+              platform: item.task.platform,
+              boxartUrl: item.task.boxartUrl,
+              link: item.task.link,
+            );
+        if (downloadResult == AddDownloadResult.added) queued++;
       }
+      message = queued == 0
+          ? 'Nothing was queued'
+          : 'Queued $queued download${queued == 1 ? '' : 's'}';
     }
+
+    if (!mounted) return;
+    await ref.read(downloadProvider.notifier).refresh();
+    if (!mounted) return;
+    setState(_selectedPaths.clear);
+    ref.invalidate(downloadedSlugsProvider);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 }
 
 class _LibraryItemTile extends StatelessWidget {
-  final DownloadTask item;
-  final bool fileExists;
+  final LibraryEntry item;
+  final bool selected;
+  final bool selecting;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
+  final VoidCallback? onLongPress;
+  final VoidCallback onManage;
 
   const _LibraryItemTile({
     required this.item,
-    required this.fileExists,
+    required this.selected,
+    required this.selecting,
     required this.onTap,
-    required this.onDelete,
+    required this.onLongPress,
+    required this.onManage,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final task = item.task;
 
     return ListTile(
+      selected: selected,
+      onLongPress: onLongPress,
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(4),
         child: SizedBox(
           width: 56,
           height: 56,
-          child: item.boxartUrl != null
+          child: task.boxartUrl != null
               ? CachedNetworkImage(
-                  imageUrl: item.boxartUrl!,
+                  imageUrl: task.boxartUrl!,
                   fit: BoxFit.cover,
                   placeholder: (context, string) => Container(
                     color: Colors.grey[300],
@@ -558,13 +675,9 @@ class _LibraryItemTile extends StatelessWidget {
         ),
       ),
       title: Text(
-        item.title,
+        task.title,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: fileExists ? null : Colors.grey,
-          decoration: fileExists ? null : TextDecoration.lineThrough,
-        ),
       ),
       subtitle: Row(
         children: [
@@ -576,7 +689,7 @@ class _LibraryItemTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                PlatformNames.getDisplayName(item.platform),
+                PlatformNames.getDisplayName(task.platform),
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
@@ -587,25 +700,19 @@ class _LibraryItemTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 4),
-          Text(
-            item.link.sizeStr,
-            style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-          ),
-          if (!fileExists) ...[
-            const SizedBox(width: 4),
-            Icon(Icons.warning, size: 12, color: Colors.orange[700]),
-            const SizedBox(width: 2),
+          if (task.link.sizeStr.isNotEmpty)
             Text(
-              'Missing',
-              style: TextStyle(fontSize: 10, color: Colors.orange[700]),
+              task.link.sizeStr,
+              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
             ),
-          ],
         ],
       ),
-      trailing: IconButton(
-        icon: const Icon(Icons.delete_outline),
-        onPressed: onDelete,
-      ),
+      trailing: selecting
+          ? Icon(selected ? Icons.check_circle : Icons.circle_outlined)
+          : IconButton(
+              icon: const Icon(Icons.more_horiz),
+              onPressed: onManage,
+            ),
       onTap: onTap,
     );
   }

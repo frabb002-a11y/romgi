@@ -118,6 +118,27 @@ class StorageService {
     return defaultPlatformDirectory;
   }
 
+  /// Platform folders that can hold library files: custom paths, plus every
+  /// folder already created under the default download directory.
+  Future<List<Directory>> libraryDirectories() async {
+    final directories = <Directory>[];
+    final seen = <String>{};
+    for (final platform in _platformPaths.keys) {
+      final directory = await getPlatformDirectory(platform);
+      if (seen.add(directory.path)) directories.add(directory);
+    }
+    final base = await getDownloadDirectory();
+    if (await base.exists()) {
+      await for (final entity in base.list(followLinks: false)) {
+        if (entity is! Directory) continue;
+        final name = path.basename(entity.path);
+        if (name.startsWith('.')) continue;
+        if (seen.add(entity.path)) directories.add(entity);
+      }
+    }
+    return directories;
+  }
+
   Future<String> getDownloadPath(String platform, String filename) async {
     final platformDirectory = await getPlatformDirectory(platform);
 

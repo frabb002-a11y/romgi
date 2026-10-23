@@ -4,7 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../providers/providers.dart';
+import '../services/batch_acquire.dart';
+import '../services/link_resolver.dart';
 import '../utils/utils.dart';
+import '../widgets/acquire_mode_dialog.dart';
 import '../widgets/widgets.dart';
 import 'entry_detail_screen.dart';
 
@@ -20,6 +23,7 @@ class BrowseScreen extends ConsumerStatefulWidget {
 class _BrowseScreenState extends ConsumerState<BrowseScreen> {
   final _searchController = TextEditingController();
   final _scrollController = ScrollController();
+  bool _addingSelection = false;
 
   @override
   void initState() {
@@ -270,11 +274,49 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
     final activeFilterCount =
         searchState.selectedPlatforms.length +
         searchState.selectedRegions.length +
-        (searchState.retroAchievementsOnly ? 1 : 0);
+        (searchState.retroAchievementsOnly ? 1 : 0) +
+        (searchState.mobyScoreOnly ? 1 : 0);
+    final selecting = searchState.selection.active;
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
     return Scaffold(
+      bottomNavigationBar: selecting
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: Row(
+                  children: [
+                    Text('${searchState.selectedCount} selected'),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () =>
+                          ref.read(searchProvider.notifier).clearSelection(),
+                      child: const Text('Clear'),
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          ref.read(searchProvider.notifier).selectAll(),
+                      child: const Text('Select all'),
+                    ),
+                    FilledButton(
+                      onPressed: searchState.selectedCount == 0 ||
+                              _addingSelection
+                          ? null
+                          : _downloadSelection,
+                      child: _addingSelection
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Download'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
       body: RefreshIndicator(
         onRefresh: () async {
           // Only refresh if a search has already been performed
@@ -317,6 +359,24 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
                           ),
                         ),
                       ),
+                      if (searchState.mobyScoreOnly)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Chip(
+                            label: Text(
+                              searchState.minimumMobyScore <= 0
+                                  ? 'Has MobyGames score'
+                                  : 'Score ${searchState.minimumMobyScore.toStringAsFixed(1)}+',
+                            ),
+                            onDeleted: () {
+                              ref.read(searchProvider.notifier)
+                                ..setMobyScoreOnly(false)
+                                ..setMinimumMobyScore(0)
+                                ..search();
+                            },
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
                       ...searchState.selectedRegions.map(
                         (region) => Padding(
                           padding: const EdgeInsets.only(right: 8),
@@ -347,8 +407,8 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
                     vertical: 8,
                   ),
                   child: Text(
-                    searchState.result!.hasMore
-                        ? '${searchState.result!.currentResults}+ results'
+                    selecting
+                        ? '${searchState.selectedCount} selected'
                         : '${searchState.result!.totalResults} results',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
@@ -390,7 +450,9 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
               const SizedBox(height: 16),
               const Text('No results found'),
               if (searchState.selectedPlatforms.isNotEmpty ||
-                  searchState.selectedRegions.isNotEmpty) ...[
+                  searchState.selectedRegions.isNotEmpty ||
+                  searchState.mobyScoreOnly ||
+                  searchState.retroAchievementsOnly) ...[
                 const SizedBox(height: 8),
                 TextButton(
                   onPressed: () {
@@ -415,6 +477,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
   Widget _buildSliverList(List entries, SearchState searchState) {
     final downloadedSlugs = ref.watch(downloadedSlugsProvider);
     final downloadedSet = downloadedSlugs.valueOrNull ?? <String>{};
+    final scores = ref.watch(mobySyncProvider.select((sync) => sync.index));
 
     return SliverList(
       delegate: SliverChildBuilderDelegate((context, index) {
@@ -433,7 +496,10 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
             RomListTile(
               entry: entry,
               isDownloaded: downloadedSet.contains(entry.slug),
-              onTap: () => _openEntry(entry.slug),
+              selected: searchState.selection.contains(entry.slug),
+              score: scores.lookup(entry.platform, entry.title),
+              onTap: () => _onEntryTap(entry.slug),
+              onLongPress: () => _onEntryLongPress(entry.slug),
             ),
             if (index < entries.length - 1) const Divider(height: 1),
           ],
@@ -445,6 +511,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
   Widget _buildSliverGrid(List entries, SearchState searchState) {
     final downloadedSlugs = ref.watch(downloadedSlugsProvider);
     final downloadedSet = downloadedSlugs.valueOrNull ?? <String>{};
+    final scores = ref.watch(mobySyncProvider.select((sync) => sync.index));
 
     // Get screen width to calculate columns
     final screenWidth = MediaQuery.of(context).size.width;
@@ -470,9 +537,85 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
           return RomGridCard(
             entry: entry,
             isDownloaded: downloadedSet.contains(entry.slug),
-            onTap: () => _openEntry(entry.slug),
+            selected: searchState.selection.contains(entry.slug),
+            score: scores.lookup(entry.platform, entry.title),
+            onTap: () => _onEntryTap(entry.slug),
+            onLongPress: () => _onEntryLongPress(entry.slug),
           );
         }, childCount: entries.length + (searchState.result!.hasMore ? 1 : 0)),
+      ),
+    );
+  }
+
+  void _onEntryTap(String slug) {
+    if (ref.read(searchProvider).selection.active) {
+      ref.read(searchProvider.notifier).toggleSelected(slug);
+    } else {
+      _openEntry(slug);
+    }
+  }
+
+  void _onEntryLongPress(String slug) {
+    final selection = ref.read(searchProvider).selection;
+    if (selection.active) {
+      ref.read(searchProvider.notifier).toggleSelected(slug);
+    } else {
+      ref.read(searchProvider.notifier).startSelecting(slug);
+    }
+  }
+
+  Future<void> _downloadSelection() async {
+    final count = ref.read(searchProvider).selectedCount;
+    if (count == 0) return;
+    final mode = await showAcquireModeDialog(context, count: count);
+    if (mode == null || !mounted) return;
+
+    setState(() => _addingSelection = true);
+    late final BatchAcquireReport report;
+    try {
+      final slugs = await ref
+          .read(searchProvider.notifier)
+          .resolveSelectedSlugs();
+      final iaLoggedIn = await ref.read(iaLoggedInProvider.future);
+      final base = ref.read(downloadServiceProvider).getLinkResolverPrefs();
+      report = await acquireSelection(
+        slugs: slugs,
+        ghost: mode == AcquireMode.ghost,
+        db: ref.read(romDatabaseProvider),
+        downloads: ref.read(downloadServiceProvider),
+        prefs: LinkResolverPrefs(
+          disabledSourceIds: base.disabledSourceIds,
+          preferredSourceIds: base.preferredSourceIds,
+          isIaLoggedIn: iaLoggedIn,
+          torrentsDisabled: base.torrentsDisabled,
+          debridEnabled: base.debridEnabled,
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        setState(() => _addingSelection = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not add the selection')),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _addingSelection = false);
+    ref.read(searchProvider.notifier).clearSelection();
+
+    final parts = <String>[];
+    if (report.ghosts > 0) parts.add('${report.ghosts} ghost files');
+    if (report.queued > 0) parts.add('${report.queued} queued');
+    if (report.skippedArchives > 0) {
+      parts.add('${report.skippedArchives} archives skipped');
+    }
+    if (report.duplicates > 0) parts.add('${report.duplicates} already added');
+    if (report.missing > 0) parts.add('${report.missing} unavailable');
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(parts.isEmpty ? 'Nothing to add' : parts.join(', ')),
       ),
     );
   }

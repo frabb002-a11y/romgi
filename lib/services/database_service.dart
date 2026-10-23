@@ -6,7 +6,7 @@ import '../models/models.dart';
 class DatabaseService {
   static Database? _database;
   static const String _dbName = 'romgi.db';
-  static const int _dbVersion = 8;
+  static const int _dbVersion = 10;
 
   Future<Database> get database async {
     _database ??= await _initDatabase();
@@ -115,6 +115,41 @@ class DatabaseService {
         )
       ''');
     }
+
+    if (oldVersion < 9) {
+      await _createLibraryTables(db);
+    }
+    if (oldVersion >= 9 && oldVersion < 10) {
+      await db.execute(
+        'ALTER TABLE moby_sync ADD COLUMN cutoff REAL NOT NULL DEFAULT 0',
+      );
+    }
+  }
+
+  Future<void> _createLibraryTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_ignores (
+        path TEXT PRIMARY KEY
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS moby_scores (
+        platform TEXT NOT NULL,
+        title_key TEXT NOT NULL,
+        score REAL NOT NULL,
+        game_id INTEGER NOT NULL,
+        PRIMARY KEY (platform, title_key)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS moby_sync (
+        platform TEXT PRIMARY KEY,
+        page_offset INTEGER NOT NULL,
+        complete INTEGER NOT NULL DEFAULT 0,
+        cutoff REAL NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      )
+    ''');
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -200,6 +235,7 @@ class DatabaseService {
         no_match INTEGER NOT NULL DEFAULT 0
       )
     ''');
+    await _createLibraryTables(db);
   }
 
   Future<void> insertDownload(DownloadTask task) async {
@@ -530,5 +566,110 @@ class DatabaseService {
         now.subtract(const Duration(days: 30)).millisecondsSinceEpoch,
       ],
     );
+  }
+
+  Future<Set<String>> ignoredPaths() async {
+    final db = await database;
+    final rows = await db.query('library_ignores');
+    return rows.map((row) => row['path'] as String).toSet();
+  }
+
+  Future<void> ignorePath(String path) async {
+    final db = await database;
+    await db.insert('library_ignores', {'path': path},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> unignorePath(String path) async {
+    final db = await database;
+    await db.delete('library_ignores', where: 'path = ?', whereArgs: [path]);
+  }
+
+  Future<void> upsertMobyScores(List<Map<String, Object?>> rows) async {
+    if (rows.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final row in rows) {
+      batch.rawInsert(
+        '''
+        INSERT INTO moby_scores (platform, title_key, score, game_id)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(platform, title_key) DO UPDATE SET
+          score = MAX(moby_scores.score, excluded.score),
+          game_id = CASE
+            WHEN excluded.score >= moby_scores.score THEN excluded.game_id
+            ELSE moby_scores.game_id
+          END
+        ''',
+        [
+          row['platform'],
+          row['title_key'],
+          row['score'],
+          row['game_id'],
+        ],
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Map<String, Object?>>> allMobyScores() async {
+    final db = await database;
+    return db.query('moby_scores');
+  }
+
+  Future<Map<String, ({int offset, bool complete, double cutoff})>>
+      mobySyncStates() async {
+    final db = await database;
+    final rows = await db.query('moby_sync');
+    return {
+      for (final row in rows)
+        row['platform'] as String: (
+          offset: row['page_offset'] as int? ?? 0,
+          complete: (row['complete'] as int? ?? 0) != 0,
+          cutoff: (row['cutoff'] as num?)?.toDouble() ?? 0,
+        ),
+    };
+  }
+
+  Future<void> setMobySync({
+    required String platform,
+    required int offset,
+    required bool complete,
+    required double cutoff,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'moby_sync',
+      {
+        'platform': platform,
+        'page_offset': offset,
+        'complete': complete ? 1 : 0,
+        'cutoff': cutoff,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteMobyPlatform(String platform) async {
+    final db = await database;
+    await db.delete('moby_scores', where: 'platform = ?', whereArgs: [platform]);
+    await db.delete('moby_sync', where: 'platform = ?', whereArgs: [platform]);
+  }
+
+  /// Keeps stored scores and walks every platform again.
+  Future<void> rewindMobySync() async {
+    final db = await database;
+    await db.update('moby_sync', {
+      'page_offset': 0,
+      'complete': 0,
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Future<void> clearMobyScores() async {
+    final db = await database;
+    await db.delete('moby_scores');
+    await db.delete('moby_sync');
   }
 }

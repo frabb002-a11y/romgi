@@ -1,0 +1,149 @@
+import 'package:dio/dio.dart';
+import 'package:native_dio_adapter/native_dio_adapter.dart';
+
+class MobyPageException implements Exception {
+  final String message;
+
+  const MobyPageException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+class MobyListedGame {
+  final int gameId;
+  final String title;
+  final double score;
+
+  const MobyListedGame({
+    required this.gameId,
+    required this.title,
+    required this.score,
+  });
+}
+
+class MobyPageParse {
+  final List<MobyListedGame> games;
+
+  /// True when a row had no score, or a score below the cutoff.
+  /// [games] stops before that row.
+  final bool stopped;
+
+  const MobyPageParse({required this.games, required this.stopped});
+}
+
+final _rowPattern = RegExp(r'<tr>(.*?)</tr>', dotAll: true);
+final _titlePattern = RegExp(
+  r'<a href="(?:https://www\.mobygames\.com)?/game/(\d+)/[^"]+/">([^<]+)</a>',
+);
+final _scorePattern = RegExp(r'class="mobyscore"[^>]*>\s*([\d.]+)');
+
+/// Reads one public platform listing page. Rows are already ordered by
+/// score, highest first. Stops at the first missing score or the first
+/// score below [cutoff]. A cutoff of 0 keeps every scored row.
+MobyPageParse parseMobyPlatformPage(String html, {required double cutoff}) {
+  final games = <MobyListedGame>[];
+  final seen = <String>{};
+  for (final row in _rowPattern.allMatches(html)) {
+    final rowHtml = row.group(1)!;
+    final titleMatch = _titlePattern.firstMatch(rowHtml);
+    if (titleMatch == null) continue;
+    final title = unescapeHtml(titleMatch.group(2)!.trim());
+    if (title.isEmpty || !seen.add(title)) continue;
+    final scoreMatch = _scorePattern.firstMatch(rowHtml);
+    final score = scoreMatch == null
+        ? null
+        : double.tryParse(scoreMatch.group(1)!);
+    if (score == null || score < cutoff) {
+      return MobyPageParse(games: games, stopped: true);
+    }
+    games.add(
+      MobyListedGame(
+        gameId: int.tryParse(titleMatch.group(1)!) ?? 0,
+        title: title,
+        score: score,
+      ),
+    );
+  }
+  return MobyPageParse(games: games, stopped: false);
+}
+
+String unescapeHtml(String value) {
+  final numeric = value.replaceAllMapped(RegExp(r'&#(\d+);'), (match) {
+    return String.fromCharCode(int.parse(match.group(1)!));
+  }).replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'), (match) {
+    return String.fromCharCode(int.parse(match.group(1)!, radix: 16));
+  });
+  return numeric
+      .replaceAll('&amp;', '&')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&apos;', "'")
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&nbsp;', ' ');
+}
+
+bool mobyPageLooksBlocked(String html) {
+  if (html.contains('/game/')) return false;
+  final lower = html.toLowerCase();
+  return lower.contains('just a moment') ||
+      lower.contains('cf-challenge') ||
+      lower.contains('challenge-platform') ||
+      lower.contains('cf-browser-verification');
+}
+
+class MobyPageClient {
+  MobyPageClient({Dio? dio}) : _dio = dio ?? _createDio();
+
+  final Dio _dio;
+
+  static Dio _createDio() {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: const {
+          'User-Agent':
+              'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+        responseType: ResponseType.plain,
+        validateStatus: (status) => status != null && status < 600,
+      ),
+    );
+    dio.httpClientAdapter = NativeAdapter();
+    return dio;
+  }
+
+  Future<String> fetchPlatformPage(
+    String slug,
+    int page, {
+    CancelToken? cancelToken,
+  }) async {
+    final base = 'https://www.mobygames.com/platform/$slug/';
+    final url = page <= 0 ? base : '${base}page:$page/';
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final response = await _dio.get<String>(url, cancelToken: cancelToken);
+      final code = response.statusCode ?? 0;
+      if (code == 429) {
+        await Future<void>.delayed(const Duration(seconds: 5));
+        continue;
+      }
+      if (code != 200) {
+        throw MobyPageException('MobyGames returned HTTP $code.');
+      }
+      final html = response.data ?? '';
+      if (mobyPageLooksBlocked(html)) {
+        throw const MobyPageException(
+          'MobyGames blocked the request. Try again in a little while.',
+        );
+      }
+      return html;
+    }
+    throw const MobyPageException(
+      'MobyGames is rate limiting requests. Try again in a little while.',
+    );
+  }
+}

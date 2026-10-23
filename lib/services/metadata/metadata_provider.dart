@@ -53,6 +53,9 @@ abstract class GameMetadataProvider {
 
   List<CredentialField> get credentialFields;
 
+  /// False for providers that only store credentials for another feature.
+  bool get suppliesDescriptions => true;
+
   bool isConfigured(Map<String, String>? creds) {
     if (creds == null) return false;
     for (final field in credentialFields) {

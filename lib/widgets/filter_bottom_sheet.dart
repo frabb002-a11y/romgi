@@ -15,6 +15,8 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
   late Set<String> _selectedPlatforms;
   late Set<String> _selectedRegions;
   late bool _retroAchievementsOnly;
+  late bool _mobyScoreOnly;
+  late double _minimumMobyScore;
 
   @override
   void initState() {
@@ -24,6 +26,8 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
     _selectedPlatforms = searchState.selectedPlatforms.toSet();
     _selectedRegions = searchState.selectedRegions.toSet();
     _retroAchievementsOnly = searchState.retroAchievementsOnly;
+    _mobyScoreOnly = searchState.mobyScoreOnly;
+    _minimumMobyScore = searchState.minimumMobyScore;
   }
 
   @override
@@ -73,6 +77,8 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                           _selectedPlatforms.clear();
                           _selectedRegions.clear();
                           _retroAchievementsOnly = false;
+                          _mobyScoreOnly = false;
+                          _minimumMobyScore = 0;
                         });
                       },
                       child: const Text('Clear all'),
@@ -151,6 +157,42 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
 
                     const SizedBox(height: 24),
 
+                    Text(
+                      'MobyGames score',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Only platforms whose score list has finished are filtered. '
+                      'The rest stay in the results.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Has a score'),
+                      value: _mobyScoreOnly,
+                      onChanged: (value) =>
+                          setState(() => _mobyScoreOnly = value),
+                    ),
+                    Text(
+                      _minimumMobyScore <= 0
+                          ? 'Any score'
+                          : 'At least ${_minimumMobyScore.toStringAsFixed(1)}',
+                    ),
+                    Slider(
+                      value: _minimumMobyScore,
+                      min: 0,
+                      max: 10,
+                      divisions: 20,
+                      label: _minimumMobyScore.toStringAsFixed(1),
+                      onChanged: _mobyScoreOnly
+                          ? (value) =>
+                                setState(() => _minimumMobyScore = value)
+                          : null,
+                    ),
+
+                    const SizedBox(height: 24),
+
                     // Platforms section
                     Text(
                       'Platforms',
@@ -180,6 +222,8 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                           ..setSelectedPlatforms(_selectedPlatforms.toList())
                           ..setSelectedRegions(_selectedRegions.toList())
                           ..setRetroAchievementsOnly(_retroAchievementsOnly)
+                          ..setMobyScoreOnly(_mobyScoreOnly)
+                          ..setMinimumMobyScore(_minimumMobyScore)
                           ..search();
                         Navigator.pop(context);
                       },

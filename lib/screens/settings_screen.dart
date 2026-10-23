@@ -9,6 +9,7 @@ import '../services/rom_database_service.dart';
 import '../services/storage_service.dart';
 import '../utils/utils.dart';
 import 'internet_archive_login_screen.dart';
+import 'moby_settings_section.dart';
 import 'sources_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -108,6 +109,11 @@ class SettingsScreen extends ConsumerWidget {
 
                 _SectionHeader(title: 'Game Metadata'),
                 const _MetadataSection(),
+
+                const Divider(height: 32),
+
+                _SectionHeader(title: 'MobyGames'),
+                const MobySettingsSection(),
 
                 const Divider(height: 32),
 

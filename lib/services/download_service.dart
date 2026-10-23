@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/models.dart';
+import '../utils/archive_files.dart';
 import '../torrent/torrent_api.g.dart';
 import 'database_service.dart';
 import 'debrid_service.dart';
@@ -232,6 +233,64 @@ class DownloadService {
 
     _processQueue();
 
+    return (AddDownloadResult.added, downloadTask);
+  }
+
+  /// Writes a 0-byte file with [link]'s own filename and records it as a
+  /// completed download. Archives are refused. An existing file that already
+  /// has data is left alone.
+  Future<(AddDownloadResult, DownloadTask?)> createGhost({
+    required String slug,
+    required String title,
+    required String platform,
+    String? boxartUrl,
+    required DownloadLink link,
+    String? groupId,
+    int? groupIndex,
+    String? groupTitle,
+    int? groupTotal,
+  }) async {
+    if (!canGhostFilename(link.filename)) {
+      return (AddDownloadResult.duplicate, null);
+    }
+
+    final existingDownload = await _db.findExistingDownload(slug);
+    if (existingDownload != null) {
+      return (AddDownloadResult.duplicate, existingDownload);
+    }
+
+    final downloadPath = await _storage.getDownloadPath(platform, link.filename);
+    final file = File(downloadPath);
+    if (await file.exists()) {
+      if (await file.length() > 0) {
+        return (AddDownloadResult.duplicate, null);
+      }
+    } else {
+      await file.create(recursive: true);
+    }
+    await file.writeAsBytes(const [], flush: true);
+
+    final downloadTask = DownloadTask(
+      id: _uuid.v4(),
+      slug: slug,
+      title: title,
+      platform: platform,
+      boxartUrl: boxartUrl,
+      link: link,
+      status: DownloadStatus.completed,
+      progress: 1,
+      filePath: downloadPath,
+      createdAt: DateTime.now(),
+      completedAt: DateTime.now(),
+      groupId: groupId,
+      groupIndex: groupIndex,
+      groupTitle: groupTitle,
+      groupTotal: groupTotal,
+    );
+
+    await _db.insertDownload(downloadTask);
+    _downloadController.add(downloadTask);
+    await _maybeWritePlaylist(downloadTask);
     return (AddDownloadResult.added, downloadTask);
   }
 

@@ -8,18 +8,26 @@ import 'retro_achievements_badge.dart';
 class RomListTile extends StatelessWidget {
   final RomEntry entry;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final bool isDownloaded;
+  final bool selected;
+  final double? score;
 
   const RomListTile({
     super.key,
     required this.entry,
     this.onTap,
+    this.onLongPress,
     this.isDownloaded = false,
+    this.selected = false,
+    this.score,
   });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
+      selected: selected,
+      onLongPress: onLongPress,
       leading: Stack(
         children: [
           SizedBox(
@@ -79,6 +87,17 @@ class RomListTile extends StatelessWidget {
               RegionUtils.getFlags(entry.regions),
               style: const TextStyle(fontSize: 14),
             ),
+          if (score != null) ...[
+            const SizedBox(width: 4),
+            Text(
+              score!.toStringAsFixed(1),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ],
         ],
       ),
       onTap: onTap,
