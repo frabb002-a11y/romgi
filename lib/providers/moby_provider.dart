@@ -223,15 +223,6 @@ class MobySyncNotifier extends StateNotifier<MobySyncState> {
         );
         if (!mounted || _generation != runId) break;
         final parsed = parseMobyPlatformPage(html, cutoff: cutoff);
-        final pager = mobyListingPager(html);
-        // A page past the end of a long list (Nintendo DS is 49) still
-        // returns scored rows, so an empty-page check never trips.
-        if (pager != null && pager.current != page + 1) {
-          throw MobyPageException(
-            'MobyGames returned page ${pager.current} of ${pager.count} '
-            'instead of page ${page + 1}. Rebuild this platform.',
-          );
-        }
         final ids = [for (final game in parsed.games) game.gameId];
         if (page > 0 && mobyPageRepeats(seenIds, ids)) {
           final kept = ids.where((id) => id > 0).length;
@@ -269,11 +260,10 @@ class MobySyncNotifier extends StateNotifier<MobySyncState> {
           if (id > 0) seenIds.add(id);
         }
         final reachedEnd = parsed.games.isEmpty && !parsed.stopped;
-        final onLastPage = pager?.isLast ?? false;
         if (reachedEnd && page == 0) {
           throw const MobyPageException('No games found on the first page.');
         }
-        if (parsed.stopped || reachedEnd || onLastPage) {
+        if (parsed.stopped || reachedEnd) {
           await _db.setMobySync(
             platform: platform,
             offset: page,
