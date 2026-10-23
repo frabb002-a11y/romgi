@@ -219,8 +219,9 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                     const SizedBox(height: 4),
                     Text(
                       'Keeps one release per game: USA, then Europe, then Japan. '
-                      'Global counts as USA. The highest revision wins. Tagged '
-                      'releases below are removed first.',
+                      'Global counts as USA. The highest version wins, so (v2.00) '
+                      'beats (v1.01). Titles '
+                      'matching the terms below are removed first.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     SwitchListTile(
@@ -233,13 +234,13 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
 
                     const SizedBox(height: 8),
                     Text(
-                      'Hide tagged releases',
+                      'Hide titles',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'A term matches a whole word inside parentheses, such as '
-                      '(Beta) or (Minis).',
+                      'A term matches a whole word in the title, such as FIFA, '
+                      '(Beta), or (Minis).',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 8),

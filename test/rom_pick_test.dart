@@ -27,6 +27,9 @@ void main() {
       isFalse,
     );
     expect(titleExcluded('Alphabet (USA)', ['beta']), isFalse);
+    expect(titleExcluded('FIFA 14', ['fifa']), isTrue);
+    expect(titleExcluded('FIFA Soccer 96 (USA)', ['fifa']), isTrue);
+    expect(titleExcluded('Fifantic Adventure', ['fifa']), isFalse);
   });
 
   test('1G1R keeps USA over Europe over Japan, then the higher revision', () {
@@ -38,6 +41,24 @@ void main() {
     ]);
 
     expect(picked.map((entry) => entry.title), ['Game (USA) (Rev 2)']);
+  });
+
+  test('1G1R keeps Peace Walker v2.00 over v1.01', () {
+    final picked = pickOnePerGame([
+      game('Peace Walker (v1.01) (USA)', regions: ['USA']),
+      game('Peace Walker (v2.00) (USA)', regions: ['USA']),
+    ]);
+
+    expect(picked.single.title, 'Peace Walker (v2.00) (USA)');
+  });
+
+  test('a USA release still beats a higher version from Japan', () {
+    final picked = pickOnePerGame([
+      game('Peace Walker (v1.01) (USA)', regions: ['USA']),
+      game('Peace Walker (v2.00) (Japan)', regions: ['Japan']),
+    ]);
+
+    expect(picked.single.title, 'Peace Walker (v1.01) (USA)');
   });
 
   test('a US beta loses to a clean European release', () {

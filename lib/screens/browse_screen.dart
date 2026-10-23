@@ -283,6 +283,23 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
+    ref.listen(searchProvider, (previous, next) {
+      final restarted =
+          (next.isLoading &&
+              next.result == null &&
+              previous?.result != null) ||
+          (next.result != null &&
+              !next.isLoading &&
+              next.result!.currentPage == 1 &&
+              (previous?.isLoading ?? false));
+      if (!restarted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        if (_scrollController.offset <= 0) return;
+        _scrollController.jumpTo(0);
+      });
+    });
+
     return Scaffold(
       bottomNavigationBar: selecting
           ? SafeArea(
@@ -400,7 +417,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
                             label: Text(
                               excludeTerms.length <= 3
                                   ? 'Hiding ${excludeTerms.join(', ')}'
-                                  : 'Hiding ${excludeTerms.length} tags',
+                                  : 'Hiding ${excludeTerms.length} terms',
                             ),
                             onDeleted: () async {
                               await ref

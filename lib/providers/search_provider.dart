@@ -88,12 +88,13 @@ class SearchNotifier extends StateNotifier<SearchState> {
     state = state.copyWith(
       query: query ?? state.query,
       isLoading: true,
+      clearResult: true,
       clearError: true,
       selection: BatchSelection.empty,
     );
 
     try {
-      final result = await _load(page: 1);
+      final result = await _load(page: 1, request: request);
       if (request != _request) return;
       state = state.copyWith(result: result, isLoading: false);
     } catch (error) {
@@ -108,11 +109,13 @@ class SearchNotifier extends StateNotifier<SearchState> {
       return;
     }
 
+    final request = _request;
     state = state.copyWith(isLoading: true, clearError: true);
 
     try {
       final nextPage = currentResult.currentPage + 1;
-      final result = await _load(page: nextPage);
+      final result = await _load(page: nextPage, request: request);
+      if (request != _request) return;
       final combinedEntries = [...currentResult.entries, ...result.entries];
       state = state.copyWith(
         result: SearchResult(
@@ -125,14 +128,15 @@ class SearchNotifier extends StateNotifier<SearchState> {
         isLoading: false,
       );
     } catch (error) {
+      if (request != _request) return;
       state = state.copyWith(error: error, isLoading: false);
     }
   }
 
-  Future<SearchResult> _load({required int page}) async {
+  Future<SearchResult> _load({required int page, required int request}) async {
     const pageSize = 100;
     if (!_usesLocalList) {
-      _filteredAll = null;
+      if (request == _request) _filteredAll = null;
       return _db.search(
         query: state.query.isEmpty ? null : state.query,
         platforms: state.selectedPlatforms.isEmpty
@@ -145,7 +149,19 @@ class SearchNotifier extends StateNotifier<SearchState> {
       );
     }
 
-    _filteredAll ??= _narrow(await _listedMatches());
+    if (_filteredAll == null) {
+      final matches = await _listedMatches();
+      if (request != _request) {
+        return SearchResult(
+          entries: const [],
+          totalResults: 0,
+          currentPage: page,
+          totalPages: 1,
+          currentResults: 0,
+        );
+      }
+      _filteredAll = _narrow(matches);
+    }
     final all = _filteredAll!;
     final start = (page - 1) * pageSize;
     final end = start + pageSize;
