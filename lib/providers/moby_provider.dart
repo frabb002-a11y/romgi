@@ -6,6 +6,7 @@ import '../services/metadata/moby_page.dart';
 import '../services/metadata/moby_platforms.dart';
 import '../services/metadata/moby_score_index.dart';
 import '../services/metadata/moby_titles.dart';
+import '../services/metadata/moby_transfer.dart';
 import 'download_provider.dart';
 
 class MobyPlatformProgress {
@@ -328,6 +329,66 @@ class MobySyncNotifier extends StateNotifier<MobySyncState> {
       );
     }
     await _load(clearError: !failed && state.error == null);
+  }
+
+  Future<MobyTransfer> exportMobyTransfer() async {
+    final scoreRows = await _db.allMobyScores();
+    final sync = await _db.mobySyncStates();
+    return MobyTransfer(
+      scores: [
+        for (final row in scoreRows)
+          if (row['platform'] is String &&
+              row['title_key'] is String &&
+              row['score'] is num &&
+              row['game_id'] is int)
+            MobyScoreRow(
+              platform: row['platform'] as String,
+              titleKey: row['title_key'] as String,
+              score: (row['score'] as num).toDouble(),
+              gameId: row['game_id'] as int,
+            ),
+      ],
+      sync: [
+        for (final entry in sync.entries)
+          MobySyncRow(
+            platform: entry.key,
+            pageOffset: entry.value.offset,
+            complete: entry.value.complete,
+            cutoff: entry.value.cutoff,
+          ),
+      ],
+    );
+  }
+
+  /// Merges a score list into this device. Download history is left alone.
+  Future<int> importMobyTransfer(String source) async {
+    final transfer = parseMobyTransfer(source);
+    await _db.upsertMobyScores([
+      for (final row in transfer.scores) row.toDbRow(),
+    ]);
+    final local = await _db.mobySyncStates();
+    final merged = mergeMobySync(
+      local: [
+        for (final entry in local.entries)
+          MobySyncRow(
+            platform: entry.key,
+            pageOffset: entry.value.offset,
+            complete: entry.value.complete,
+            cutoff: entry.value.cutoff,
+          ),
+      ],
+      imported: transfer.sync,
+    );
+    for (final row in merged) {
+      await _db.setMobySync(
+        platform: row.platform,
+        offset: row.pageOffset,
+        complete: row.complete,
+        cutoff: row.cutoff,
+      );
+    }
+    await _load(clearError: true);
+    return transfer.scores.length;
   }
 }
 

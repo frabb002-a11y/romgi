@@ -1,9 +1,15 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../providers/providers.dart';
 import '../services/metadata/moby_platforms.dart';
+import '../services/metadata/moby_transfer.dart';
 import '../utils/utils.dart';
 
 class MobySettingsSection extends ConsumerStatefulWidget {
@@ -42,8 +48,24 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
             'Builds a local score list from public MobyGames pages, one page '
             'per second. The first page may ask for a browser check. Check '
             'several platforms to walk them in order. Browse only filters '
-            'platforms whose build has finished.',
+            'platforms whose build has finished. Export the score list to '
+            'move a finished build onto another device.',
             style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+          child: Row(
+            children: [
+              TextButton(
+                onPressed: sync.running ? null : _exportScores,
+                child: const Text('Export scores'),
+              ),
+              TextButton(
+                onPressed: sync.running ? null : _importScores,
+                child: const Text('Import scores'),
+              ),
+            ],
           ),
         ),
         ListTile(
@@ -180,6 +202,60 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
           ),
       ],
     );
+  }
+
+  Future<void> _exportScores() async {
+    final transfer = await ref
+        .read(mobySyncProvider.notifier)
+        .exportMobyTransfer();
+    if (!mounted) return;
+    if (transfer.scores.isEmpty && transfer.sync.isEmpty) {
+      _tell('No MobyGames scores to export.');
+      return;
+    }
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: 'Export MobyGames scores',
+      fileName: 'romgi-moby.json',
+      bytes: Uint8List.fromList(utf8.encode(encodeMobyTransfer(transfer))),
+    );
+    if (!mounted || path == null) return;
+    _tell('Exported ${transfer.scores.length} scores.');
+  }
+
+  Future<void> _importScores() async {
+    final picked = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Import MobyGames scores',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      withData: true,
+    );
+    if (!mounted || picked == null || picked.files.isEmpty) return;
+    final file = picked.files.single;
+    final bytes = file.bytes;
+    final String source;
+    if (bytes != null) {
+      source = utf8.decode(bytes);
+    } else if (file.path != null) {
+      source = await File(file.path!).readAsString();
+    } else {
+      _tell('Could not read that file.');
+      return;
+    }
+    if (!mounted) return;
+    try {
+      final count = await ref
+          .read(mobySyncProvider.notifier)
+          .importMobyTransfer(source);
+      if (!mounted) return;
+      _tell('Imported $count scores. Download history was left as it is.');
+    } on MobyTransferException catch (error) {
+      if (!mounted) return;
+      _tell(error.message);
+    }
+  }
+
+  void _tell(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _run(MobyJobKind kind) {
