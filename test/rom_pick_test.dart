@@ -50,10 +50,10 @@ void main() {
     expect(picked.single.title, 'Game (Europe)');
   });
 
-  test('world ranks with the US, and discs stay separate', () {
+  test('global counts as USA, and discs stay separate', () {
     final picked = pickOnePerGame([
       game('Game (Japan)', regions: ['Japan']),
-      game('Game (World)', regions: ['World']),
+      game('Game (Global)', regions: ['Global']),
       game('Game (Disc 1) (USA)', regions: ['USA']),
       game('Game (Disc 2) (Europe)', regions: ['Europe']),
     ]);
@@ -61,7 +61,17 @@ void main() {
     expect(picked.map((entry) => entry.title), [
       'Game (Disc 1) (USA)',
       'Game (Disc 2) (Europe)',
-      'Game (World)',
+      'Game (Global)',
     ]);
+  });
+
+  test('a release outside USA, Europe, and Japan is not the 1G1R pick', () {
+    final picked = pickOnePerGame([
+      game('Only Korea (Korea)', regions: ['Korea']),
+      game('Mixed (Korea)', regions: ['Korea']),
+      game('Mixed (Japan)', regions: ['Japan']),
+    ]);
+
+    expect(picked.map((entry) => entry.title), ['Mixed (Japan)']);
   });
 }

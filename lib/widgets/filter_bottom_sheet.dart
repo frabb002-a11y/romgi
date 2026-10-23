@@ -218,8 +218,8 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Keeps one release per game: USA, then Europe, then Japan, '
-                      'then anything else. The highest revision wins. Tagged '
+                      'Keeps one release per game: USA, then Europe, then Japan. '
+                      'Global counts as USA. The highest revision wins. Tagged '
                       'releases below are removed first.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),

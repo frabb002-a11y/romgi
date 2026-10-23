@@ -45,17 +45,23 @@ bool titleExcluded(String title, Iterable<String> terms) {
   return false;
 }
 
-/// USA and World, then Europe, then Japan, then anything else.
-int releaseRegionRank(RomEntry entry) {
-  var best = 3;
+/// USA, then Europe, then Japan. Global counts as USA.
+/// Null when the release is none of those. The browse region filter
+/// already decides whether those other releases are in the list.
+int? releaseRegionRank(RomEntry entry) {
+  int? best;
+  void consider(String raw) {
+    final rank = _regionRank(raw);
+    if (rank == null) return;
+    if (best == null || rank < best!) best = rank;
+  }
+
   for (final region in entry.regions) {
-    final rank = _regionRank(region);
-    if (rank < best) best = rank;
+    consider(region);
   }
   for (final tag in _tags(entry.title)) {
     for (final part in tag.split(RegExp(r'\s*[,/+]\s*'))) {
-      final rank = _regionRank(part);
-      if (rank < best) best = rank;
+      consider(part);
     }
   }
   return best;
@@ -83,8 +89,13 @@ List<RomEntry> pickOnePerGame(List<RomEntry> entries) {
   }
   final picked = <RomEntry>[];
   for (final group in groups.values) {
-    group.sort((a, b) {
-      final region = releaseRegionRank(a).compareTo(releaseRegionRank(b));
+    final ranked = [
+      for (final entry in group)
+        if (releaseRegionRank(entry) != null) entry,
+    ];
+    if (ranked.isEmpty) continue;
+    ranked.sort((a, b) {
+      final region = releaseRegionRank(a)!.compareTo(releaseRegionRank(b)!);
       if (region != 0) return region;
       final revision = revisionNumber(
         b.title,
@@ -92,7 +103,7 @@ List<RomEntry> pickOnePerGame(List<RomEntry> entries) {
       if (revision != 0) return revision;
       return a.title.toLowerCase().compareTo(b.title.toLowerCase());
     });
-    picked.add(group.first);
+    picked.add(ranked.first);
   }
   picked.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
   return picked;
@@ -122,7 +133,7 @@ List<String> _tags(String title) {
   ];
 }
 
-int _regionRank(String raw) {
+int? _regionRank(String raw) {
   final name = raw.toLowerCase().trim();
   return switch (name) {
     'us' ||
@@ -135,6 +146,6 @@ int _regionRank(String raw) {
     'global' => 0,
     'eu' || 'europe' || 'eur' || 'pal' => 1,
     'jp' || 'japan' || 'jpn' || 'ntsc-j' => 2,
-    _ => 3,
+    _ => null,
   };
 }
