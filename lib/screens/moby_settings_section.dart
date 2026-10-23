@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/models.dart';
 import '../providers/providers.dart';
 import '../services/metadata/moby_platforms.dart';
 import '../utils/utils.dart';
@@ -22,11 +23,15 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
     final settings = ref.watch(settingsProvider);
     final sync = ref.watch(mobySyncProvider);
     final cutoff = settings.mobyStopScore;
-    final platforms = mobyPlatformsToSync(full: true).where((id) {
-      if (_query.isEmpty) return true;
-      final name = PlatformNames.getDisplayName(id).toLowerCase();
-      return name.contains(_query) || id.contains(_query);
-    }).toList();
+    final catalog = ref.watch(platformsProvider).asData?.value ?? const <Platform>[];
+    final platforms = [
+      for (final platform in catalog)
+        if (mobyPlatformSlugs.containsKey(platform.id.toLowerCase()))
+          if (_query.isEmpty ||
+              platform.name.toLowerCase().contains(_query) ||
+              platform.id.toLowerCase().contains(_query))
+            platform,
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -78,7 +83,7 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
                 Expanded(
                   child: Text(
                     'Reading page ${sync.activePage + 1}'
-                    '${sync.activePlatform == null ? '' : ' of ${PlatformNames.getDisplayName(sync.activePlatform!)}'}'
+                    '${sync.activePlatform == null ? '' : ' of ${_platformName(catalog, sync.activePlatform!)}'}'
                     '${sync.activePlatform == null ? '' : ' · ${sync.platforms[sync.activePlatform!]?.stored ?? 0} titles'}',
                   ),
                 ),
@@ -118,15 +123,19 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
                 onPressed: sync.running || platforms.isEmpty
                     ? null
                     : () => setState(() {
-                        final allShown = platforms.every(_checked.contains);
+                        final ids = platforms.map((platform) => platform.id);
+                        final allShown = ids.every(_checked.contains);
                         if (allShown) {
-                          _checked.removeAll(platforms);
+                          _checked.removeAll(ids);
                         } else {
-                          _checked.addAll(platforms);
+                          _checked.addAll(ids);
                         }
                       }),
                 child: Text(
-                  platforms.isNotEmpty && platforms.every(_checked.contains)
+                  platforms.isNotEmpty &&
+                      platforms.every(
+                        (platform) => _checked.contains(platform.id),
+                      )
                       ? 'Clear shown'
                       : 'Select shown',
                 ),
@@ -152,19 +161,20 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
             ],
           ),
         ),
-        for (final id in platforms)
+        for (final platform in platforms)
           _PlatformTile(
-            id: id,
+            id: platform.id,
+            name: platform.name,
             cutoff: cutoff,
-            progress: sync.platforms[id],
+            progress: sync.platforms[platform.id],
             busy: sync.running,
-            active: sync.running && sync.activePlatform == id,
-            checked: _checked.contains(id),
+            active: sync.running && sync.activePlatform == platform.id,
+            checked: _checked.contains(platform.id),
             onChecked: (value) => setState(() {
               if (value) {
-                _checked.add(id);
+                _checked.add(platform.id);
               } else {
-                _checked.remove(id);
+                _checked.remove(platform.id);
               }
             }),
           ),
@@ -173,9 +183,10 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
   }
 
   void _run(MobyJobKind kind) {
+    final catalog = ref.read(platformsProvider).asData?.value ?? const <Platform>[];
     final ids = [
-      for (final id in mobyPlatformsToSync(full: true))
-        if (_checked.contains(id)) id,
+      for (final platform in catalog)
+        if (_checked.contains(platform.id)) platform.id,
     ];
     ref
         .read(mobySyncProvider.notifier)
@@ -187,8 +198,16 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
   }
 }
 
+String _platformName(List<Platform> catalog, String id) {
+  for (final platform in catalog) {
+    if (platform.id == id) return platform.name;
+  }
+  return PlatformNames.getDisplayName(id);
+}
+
 class _PlatformTile extends ConsumerWidget {
   final String id;
+  final String name;
   final double cutoff;
   final MobyPlatformProgress? progress;
   final bool busy;
@@ -198,6 +217,7 @@ class _PlatformTile extends ConsumerWidget {
 
   const _PlatformTile({
     required this.id,
+    required this.name,
     required this.cutoff,
     required this.progress,
     required this.busy,
@@ -221,7 +241,7 @@ class _PlatformTile extends ConsumerWidget {
         value: checked,
         onChanged: busy ? null : (value) => onChecked(value ?? false),
       ),
-      title: Text(PlatformNames.getDisplayName(id)),
+      title: Text(name),
       subtitle: Text(_status(current, active: active)),
       trailing: PopupMenuButton<MobyJobKind>(
         enabled: canBuild || canContinue || canRebuild,

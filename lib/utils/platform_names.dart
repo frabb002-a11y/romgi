@@ -20,7 +20,7 @@ class PlatformNames {
     'nds': 'Nintendo DS',
     'ds': 'Nintendo DS',
     '3ds': 'Nintendo 3DS',
-    'n3ds': 'Nintendo 3DS',
+    'n3ds': 'New Nintendo 3DS',
     'min': 'Pokemon Mini',
 
     // Sony

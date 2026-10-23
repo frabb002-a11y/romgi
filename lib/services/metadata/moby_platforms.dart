@@ -156,10 +156,32 @@ const Map<int, String> mobyCanonicalIds = {
   143: 'arcade',
 };
 
+/// Older Romgi ids that share a catalog platform.
+const Map<String, String> mobyPlatformAliases = {
+  'famicom': 'nes',
+  'sfc': 'snes',
+  'ds': 'nds',
+  'psx': 'ps1',
+  'vita': 'psv',
+  'psvita': 'psv',
+  'genesis': 'smd',
+  'megadrive': 'smd',
+  'md': 'smd',
+  'segacd': 'scd',
+  'saturn': 'sat',
+  'dreamcast': 'dc',
+  'gamegear': 'gg',
+  '2600': 'a26',
+  'atari2600': 'a26',
+  'atari5200': 'a52',
+  'atari7800': 'a78',
+};
+
 String? canonicalMobyPlatform(String romgiPlatform) {
-  final mobyId = mobyPlatformIds[romgiPlatform.toLowerCase()];
-  if (mobyId == null) return null;
-  return mobyCanonicalIds[mobyId];
+  final id = romgiPlatform.toLowerCase();
+  final catalog = mobyPlatformAliases[id] ?? id;
+  if (mobyPlatformSlugs.containsKey(catalog)) return catalog;
+  return null;
 }
 
 bool mobyPlatformIsPc(String canonical) {
@@ -171,74 +193,64 @@ bool mobyPlatformIsArcade(String canonical) {
   return mobyPlatformIds[canonical] == mobyArcadePlatformId;
 }
 
-/// Public platform-page slug for a canonical Romgi id.
+/// Public platform-page slug for a Romgi catalog id.
+/// These are the 50 platforms in the catalog, not the wider MobyGames list.
 const Map<String, String> mobyPlatformSlugs = {
   'nes': 'nes',
+  'fds': 'famicom-disk-system',
   'snes': 'snes',
   'n64': 'n64',
+  'ndd': 'nintendo-64dd',
   'gc': 'gamecube',
   'wii': 'wii',
   'wiiu': 'wii-u',
-  'switch': 'nintendo-switch',
   'gb': 'gameboy',
   'gbc': 'gameboy-color',
   'gba': 'gameboy-advance',
   'vb': 'virtual-boy',
   'nds': 'nintendo-ds',
-  '3ds': 'nintendo-3ds',
+  'dsi': 'nintendo-dsi',
+  '3ds': '3ds',
+  'n3ds': 'new-nintendo-3ds',
   'min': 'pokemon-mini',
   'ps1': 'playstation',
   'ps2': 'playstation-2',
   'ps3': 'playstation-3',
-  'ps4': 'playstation-4',
-  'ps5': 'playstation-5',
   'psp': 'psp',
-  'vita': 'playstation-vita',
+  'psv': 'ps-vita',
   'xbox': 'xbox',
   'x360': 'xbox-360',
-  'xboxone': 'xbox-one',
-  'xboxsx': 'xbox-series',
   'sms': 'sega-master-system',
-  'sg1000': 'sg-1000',
-  'genesis': 'genesis',
-  'segacd': 'sega-cd',
+  'smd': 'genesis',
+  'scd': 'sega-cd',
   '32x': 'sega-32x',
-  'saturn': 'sega-saturn',
+  'sat': 'sega-saturn',
   'dc': 'dreamcast',
   'gg': 'game-gear',
-  '2600': 'atari-2600',
+  'a26': 'atari-2600',
   'a52': 'atari-5200',
   'a78': 'atari-7800',
   'jag': 'jaguar',
+  'jcd': 'jaguar-cd',
   'lynx': 'lynx',
   'tg16': 'turbografx-16',
+  'tgcd': 'turbografx-cd',
   'pcfx': 'pc-fx',
   'pc98': 'pc-98',
-  'tgcd': 'turbografx-cd',
-  'sgx': 'supergrafx',
-  'neogeo': 'neo-geo',
-  'ngp': 'neo-geo-pocket',
-  'ngpc': 'neo-geo-pocket-color',
   'ngcd': 'neo-geo-cd',
   '3do': '3do',
   'cdi': 'cd-i',
   'cv': 'colecovision',
   'intv': 'intellivision',
-  'msx': 'msx',
-  'wonderswan': 'wonderswan',
-  'wsc': 'wonderswan-color',
-  'amiga': 'amiga',
   'fmt': 'fm-towns',
   'pip': 'pippin',
-  'c64': 'commodore-64',
-  'dos': 'dos',
-  'pc': 'windows',
-  'arcade': 'arcade',
+  'mame': 'arcade',
+  'fbneo': 'arcade',
 };
 
-/// Platforms the user can build, in a stable order.
+/// Catalog platforms that have a MobyGames page, in a stable order.
 List<String> mobyPlatformsToSync({required bool full}) {
-  final ids = mobyCanonicalIds.values.where((platform) {
+  final ids = mobyPlatformSlugs.keys.where((platform) {
     if (full) return true;
     return !mobyPlatformIsPc(platform) && !mobyPlatformIsArcade(platform);
   }).toList();

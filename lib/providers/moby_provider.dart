@@ -179,7 +179,7 @@ class MobySyncNotifier extends StateNotifier<MobySyncState> {
     bool fromQueue = false,
   }) async {
     if ((state.running || _queueActive) && !fromQueue) return;
-    final slug = mobyPlatformSlugs[platform];
+    final slug = mobyPlatformSlugs[platform.toLowerCase()];
     if (slug == null) {
       state = state.copyWith(error: 'No MobyGames page for this platform.');
       return;
