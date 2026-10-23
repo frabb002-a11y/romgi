@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../providers/providers.dart';
+import '../utils/rom_pick.dart';
 
 class FilterBottomSheet extends ConsumerStatefulWidget {
   const FilterBottomSheet({super.key});
@@ -17,6 +18,9 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
   late bool _retroAchievementsOnly;
   late bool _mobyScoreOnly;
   late double _minimumMobyScore;
+  late bool _oneGameOneRom;
+  late List<String> _excludeTerms;
+  final _termController = TextEditingController();
 
   @override
   void initState() {
@@ -28,6 +32,21 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
     _retroAchievementsOnly = searchState.retroAchievementsOnly;
     _mobyScoreOnly = searchState.mobyScoreOnly;
     _minimumMobyScore = searchState.minimumMobyScore;
+    _oneGameOneRom = searchState.oneGameOneRom;
+    _excludeTerms = List.of(ref.read(settingsProvider).excludeTerms);
+  }
+
+  @override
+  void dispose() {
+    _termController.dispose();
+    super.dispose();
+  }
+
+  void _addTerm(String raw) {
+    final next = normalizeExcludeTerms([..._excludeTerms, raw]);
+    if (next.length == _excludeTerms.length) return;
+    setState(() => _excludeTerms = next);
+    _termController.clear();
   }
 
   @override
@@ -79,6 +98,7 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                           _retroAchievementsOnly = false;
                           _mobyScoreOnly = false;
                           _minimumMobyScore = 0;
+                          _oneGameOneRom = false;
                         });
                       },
                       child: const Text('Clear all'),
@@ -186,9 +206,77 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                       divisions: 20,
                       label: _minimumMobyScore.toStringAsFixed(1),
                       onChanged: _mobyScoreOnly
-                          ? (value) =>
-                                setState(() => _minimumMobyScore = value)
+                          ? (value) => setState(() => _minimumMobyScore = value)
                           : null,
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    Text(
+                      'One game, one ROM',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Keeps one release per game: USA, then Europe, then Japan, '
+                      'then anything else. The highest revision wins. Tagged '
+                      'releases below are removed first.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('1G1R'),
+                      value: _oneGameOneRom,
+                      onChanged: (value) =>
+                          setState(() => _oneGameOneRom = value),
+                    ),
+
+                    const SizedBox(height: 8),
+                    Text(
+                      'Hide tagged releases',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'A term matches a whole word inside parentheses, such as '
+                      '(Beta) or (Minis).',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final term in _excludeTerms)
+                          InputChip(
+                            label: Text(term),
+                            onDeleted: () => setState(() {
+                              _excludeTerms = [
+                                for (final item in _excludeTerms)
+                                  if (item != term) item,
+                              ];
+                            }),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _termController,
+                      decoration: const InputDecoration(
+                        hintText: 'Add a term',
+                        isDense: true,
+                      ),
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: _addTerm,
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () => setState(
+                          () => _excludeTerms = List.of(defaultExcludeTerms),
+                        ),
+                        child: const Text('Restore default terms'),
+                      ),
                     ),
 
                     const SizedBox(height: 24),
@@ -217,13 +305,18 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                   child: SizedBox(
                     width: double.infinity,
                     child: FilledButton(
-                      onPressed: () {
+                      onPressed: () async {
+                        await ref
+                            .read(settingsProvider.notifier)
+                            .setExcludeTerms(_excludeTerms);
+                        if (!context.mounted) return;
                         ref.read(searchProvider.notifier)
                           ..setSelectedPlatforms(_selectedPlatforms.toList())
                           ..setSelectedRegions(_selectedRegions.toList())
                           ..setRetroAchievementsOnly(_retroAchievementsOnly)
                           ..setMobyScoreOnly(_mobyScoreOnly)
                           ..setMinimumMobyScore(_minimumMobyScore)
+                          ..setOneGameOneRom(_oneGameOneRom)
                           ..search();
                         Navigator.pop(context);
                       },

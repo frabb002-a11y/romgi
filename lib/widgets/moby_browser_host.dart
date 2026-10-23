@@ -58,7 +58,7 @@ class _MobyBrowserHostState extends State<MobyBrowserHost> {
     }
     setState(() => _visible = true);
     await WidgetsBinding.instance.endOfFrame;
-    _pageFinished = 0;
+    final started = _pageFinished;
     await _controller.loadRequest(Uri.parse(url));
 
     final deadline = DateTime.now().add(const Duration(seconds: 30));
@@ -71,7 +71,9 @@ class _MobyBrowserHostState extends State<MobyBrowserHost> {
         );
       }
       await Future<void>.delayed(const Duration(milliseconds: 400));
-      if (_pageFinished == 0) continue;
+      if (_pageFinished <= started) continue;
+      final current = await _controller.currentUrl();
+      if (!_sameListingUrl(current, url)) continue;
       late final String html;
       try {
         html = await _readHtml();
@@ -89,6 +91,16 @@ class _MobyBrowserHostState extends State<MobyBrowserHost> {
       'MobyGames asked for a browser check and it did not finish. '
       'Leave the check on screen until the list appears, then try again.',
     );
+  }
+
+  bool _sameListingUrl(String? current, String requested) {
+    if (current == null || current.isEmpty) return false;
+    String trim(String value) {
+      final bare = value.split('#').first.split('?').first;
+      return bare.endsWith('/') ? bare.substring(0, bare.length - 1) : bare;
+    }
+
+    return trim(current).toLowerCase() == trim(requested).toLowerCase();
   }
 
   Future<String> _readHtml() async {

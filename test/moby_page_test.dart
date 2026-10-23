@@ -34,6 +34,25 @@ void main() {
     expect(mobyTitleKey('The Legend of Zelda (USA) [!]'), 'legend of zelda');
   });
 
+  test('the listing pager is the one after the scores', () {
+    const html = '''
+      <tr><td><a href="/game/1/alpha/">Alpha</a>
+        <span class="mobyscore">8.4</span></td></tr>
+      [ Page 2 of 49 ]
+      Related [ Page 1 of 3 ]
+    ''';
+
+    final pager = mobyListingPager(html);
+    expect(pager?.current, 2);
+    expect(pager?.count, 49);
+    expect(pager?.isLast, isFalse);
+    expect(
+      mobyPageRepeats({1, 2}, [1]),
+      isTrue,
+    );
+    expect(mobyPageRepeats({1}, [1, 2]), isFalse);
+  });
+
   test('a Cloudflare check page counts as blocked', () {
     expect(
       mobyPageLooksBlocked('<html><title>Just a moment...</title></html>'),

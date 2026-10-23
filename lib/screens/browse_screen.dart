@@ -271,11 +271,14 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
   Widget build(BuildContext context) {
     final searchState = ref.watch(searchProvider);
     final isGridView = ref.watch(isGridViewProvider);
+    final excludeTerms = ref.watch(settingsProvider).excludeTerms;
     final activeFilterCount =
         searchState.selectedPlatforms.length +
         searchState.selectedRegions.length +
         (searchState.retroAchievementsOnly ? 1 : 0) +
-        (searchState.mobyScoreOnly ? 1 : 0);
+        (searchState.mobyScoreOnly ? 1 : 0) +
+        (searchState.oneGameOneRom ? 1 : 0) +
+        (excludeTerms.isNotEmpty ? 1 : 0);
     final selecting = searchState.selection.active;
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
@@ -300,8 +303,8 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
                       child: const Text('Select all'),
                     ),
                     FilledButton(
-                      onPressed: searchState.selectedCount == 0 ||
-                              _addingSelection
+                      onPressed:
+                          searchState.selectedCount == 0 || _addingSelection
                           ? null
                           : _downloadSelection,
                       child: _addingSelection
@@ -373,6 +376,39 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
                                 ..setMobyScoreOnly(false)
                                 ..setMinimumMobyScore(0)
                                 ..search();
+                            },
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      if (searchState.oneGameOneRom)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Chip(
+                            label: const Text('1G1R'),
+                            onDeleted: () {
+                              ref.read(searchProvider.notifier)
+                                ..setOneGameOneRom(false)
+                                ..search();
+                            },
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      if (excludeTerms.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Chip(
+                            label: Text(
+                              excludeTerms.length <= 3
+                                  ? 'Hiding ${excludeTerms.join(', ')}'
+                                  : 'Hiding ${excludeTerms.length} tags',
+                            ),
+                            onDeleted: () async {
+                              await ref
+                                  .read(settingsProvider.notifier)
+                                  .setExcludeTerms(const []);
+                              if (searchState.result != null) {
+                                ref.read(searchProvider.notifier).search();
+                              }
                             },
                             visualDensity: VisualDensity.compact,
                           ),
@@ -452,6 +488,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
               if (searchState.selectedPlatforms.isNotEmpty ||
                   searchState.selectedRegions.isNotEmpty ||
                   searchState.mobyScoreOnly ||
+                  searchState.oneGameOneRom ||
                   searchState.retroAchievementsOnly) ...[
                 const SizedBox(height: 8),
                 TextButton(
@@ -745,7 +782,9 @@ class _RecentlyViewedTile extends StatelessWidget {
                     fadeInDuration: const Duration(milliseconds: 150),
                     fadeOutDuration: Duration.zero,
                     placeholder: (context, url) => Container(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
                       child: const Icon(
                         Icons.videogame_asset,
                         size: 24,
@@ -753,12 +792,16 @@ class _RecentlyViewedTile extends StatelessWidget {
                       ),
                     ),
                     errorWidget: (context, url, error) => Container(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
                       child: const Icon(Icons.videogame_asset, size: 24),
                     ),
                   )
                 : Container(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
                     child: const Icon(Icons.videogame_asset, size: 24),
                   ),
           ),

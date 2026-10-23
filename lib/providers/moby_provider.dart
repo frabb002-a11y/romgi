@@ -56,8 +56,9 @@ class MobySyncState {
       index: index ?? this.index,
       indexRevision: indexRevision ?? this.indexRevision,
       platforms: platforms ?? this.platforms,
-      activePlatform:
-          clearActive ? null : (activePlatform ?? this.activePlatform),
+      activePlatform: clearActive
+          ? null
+          : (activePlatform ?? this.activePlatform),
       activePage: activePage ?? this.activePage,
       error: clearError ? null : (error ?? this.error),
       running: running ?? this.running,
@@ -79,6 +80,7 @@ class MobySyncNotifier extends StateNotifier<MobySyncState> {
   final MobyPageClient _client;
   int _generation = 0;
   CancelToken? _cancelToken;
+  var _queueActive = false;
 
   Future<void> _load({
     bool running = false,
@@ -142,12 +144,41 @@ class MobySyncNotifier extends StateNotifier<MobySyncState> {
     _cancelToken?.cancel('cancelled');
   }
 
+  /// Walks each platform in order. One browser check is shared, so the
+  /// pages stay serial. Stop cancels the platform in progress and the rest.
+  Future<void> runPlatforms(
+    List<String> platforms, {
+    required double cutoff,
+    required MobyJobKind kind,
+  }) async {
+    if (state.running || _queueActive || platforms.isEmpty) return;
+    _queueActive = true;
+    final queueId = _generation;
+    state = state.copyWith(clearError: true);
+    try {
+      for (final platform in platforms) {
+        if (!mounted || _generation != queueId) return;
+        await runPlatform(
+          platform,
+          cutoff: cutoff,
+          kind: kind,
+          fromQueue: true,
+        );
+        if (!mounted || _generation != queueId) return;
+        if (state.error != null) return;
+      }
+    } finally {
+      _queueActive = false;
+    }
+  }
+
   Future<void> runPlatform(
     String platform, {
     required double cutoff,
     required MobyJobKind kind,
+    bool fromQueue = false,
   }) async {
-    if (state.running) return;
+    if ((state.running || _queueActive) && !fromQueue) return;
     final slug = mobyPlatformSlugs[platform];
     if (slug == null) {
       state = state.copyWith(error: 'No MobyGames page for this platform.');
@@ -181,6 +212,7 @@ class MobySyncNotifier extends StateNotifier<MobySyncState> {
     );
 
     var failed = false;
+    final seenIds = <int>{};
     try {
       while (mounted && _generation == runId) {
         state = state.copyWith(activePlatform: platform, activePage: page);
@@ -191,6 +223,31 @@ class MobySyncNotifier extends StateNotifier<MobySyncState> {
         );
         if (!mounted || _generation != runId) break;
         final parsed = parseMobyPlatformPage(html, cutoff: cutoff);
+        final pager = mobyListingPager(html);
+        // A page past the end of a long list (Nintendo DS is 49) still
+        // returns scored rows, so an empty-page check never trips.
+        if (pager != null && pager.current != page + 1) {
+          throw MobyPageException(
+            'MobyGames returned page ${pager.current} of ${pager.count} '
+            'instead of page ${page + 1}. Rebuild this platform.',
+          );
+        }
+        final ids = [for (final game in parsed.games) game.gameId];
+        if (page > 0 && mobyPageRepeats(seenIds, ids)) {
+          final kept = ids.where((id) => id > 0).length;
+          if (seenIds.length > kept) {
+            await _db.setMobySync(
+              platform: platform,
+              offset: page,
+              complete: true,
+              cutoff: cutoff,
+            );
+            break;
+          }
+          throw const MobyPageException(
+            'MobyGames returned the same page again. Rebuild this platform.',
+          );
+        }
         if (parsed.games.isNotEmpty) {
           await _db.upsertMobyScores([
             for (final game in parsed.games)
@@ -208,13 +265,15 @@ class MobySyncNotifier extends StateNotifier<MobySyncState> {
             clearError: true,
           );
         }
-        final reachedEnd = parsed.games.isEmpty && !parsed.stopped;
-        if (reachedEnd && page == 0) {
-          throw const MobyPageException(
-            'No games found on the first page.',
-          );
+        for (final id in ids) {
+          if (id > 0) seenIds.add(id);
         }
-        if (parsed.stopped || reachedEnd) {
+        final reachedEnd = parsed.games.isEmpty && !parsed.stopped;
+        final onLastPage = pager?.isLast ?? false;
+        if (reachedEnd && page == 0) {
+          throw const MobyPageException('No games found on the first page.');
+        }
+        if (parsed.stopped || reachedEnd || onLastPage) {
           await _db.setMobySync(
             platform: platform,
             offset: page,

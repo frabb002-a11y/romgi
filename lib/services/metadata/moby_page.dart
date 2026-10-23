@@ -32,6 +32,43 @@ class MobyPageParse {
   const MobyPageParse({required this.games, required this.stopped});
 }
 
+/// The "Page 3 of 49" line under a platform list. [current] is 1-based.
+class MobyListingPager {
+  final int current;
+  final int count;
+
+  const MobyListingPager({required this.current, required this.count});
+
+  bool get isLast => current >= count;
+}
+
+final _pagerPattern = RegExp(
+  r'Page\s+(\d+)\s+of\s+(\d+)',
+  caseSensitive: false,
+);
+
+/// Reads the pager that follows the scored table. A later widget, such as
+/// related listings, can carry its own "Page 1 of 2" and is ignored.
+MobyListingPager? mobyListingPager(String html) {
+  final scoreAt = html.toLowerCase().indexOf('mobyscore');
+  final region = scoreAt >= 0 ? html.substring(scoreAt) : html;
+  final match = _pagerPattern.firstMatch(region);
+  if (match == null) return null;
+  final current = int.tryParse(match.group(1)!);
+  final count = int.tryParse(match.group(2)!);
+  if (current == null || count == null || current < 1 || count < 1) {
+    return null;
+  }
+  return MobyListingPager(current: current, count: count);
+}
+
+/// True when every id on this page was already stored from an earlier page.
+bool mobyPageRepeats(Set<int> seen, Iterable<int> gameIds) {
+  final ids = gameIds.where((id) => id > 0).toList();
+  if (ids.isEmpty) return false;
+  return ids.every(seen.contains);
+}
+
 final _rowPattern = RegExp(r'<tr>(.*?)</tr>', dotAll: true);
 final _titlePattern = RegExp(
   r'<a href="(?:https://www\.mobygames\.com)?/game/(\d+)/[^"]+/">([^<]+)</a>',

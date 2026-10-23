@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../services/metadata/moby_score_index.dart';
 import '../services/rom_database_service.dart';
+import '../utils/rom_pick.dart';
 import 'api_provider.dart';
 import 'moby_provider.dart';
+import 'settings_provider.dart';
 
 class SearchState {
   final String query;
@@ -13,6 +15,7 @@ class SearchState {
   final bool retroAchievementsOnly;
   final bool mobyScoreOnly;
   final double minimumMobyScore;
+  final bool oneGameOneRom;
   final SearchResult? result;
   final bool isLoading;
   final dynamic error;
@@ -25,6 +28,7 @@ class SearchState {
     this.retroAchievementsOnly = false,
     this.mobyScoreOnly = false,
     this.minimumMobyScore = 0,
+    this.oneGameOneRom = false,
     this.result,
     this.isLoading = false,
     this.error,
@@ -40,6 +44,7 @@ class SearchState {
     bool? retroAchievementsOnly,
     bool? mobyScoreOnly,
     double? minimumMobyScore,
+    bool? oneGameOneRom,
     SearchResult? result,
     bool clearResult = false,
     bool? isLoading,
@@ -55,6 +60,7 @@ class SearchState {
           retroAchievementsOnly ?? this.retroAchievementsOnly,
       mobyScoreOnly: mobyScoreOnly ?? this.mobyScoreOnly,
       minimumMobyScore: minimumMobyScore ?? this.minimumMobyScore,
+      oneGameOneRom: oneGameOneRom ?? this.oneGameOneRom,
       result: clearResult ? null : (result ?? this.result),
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
@@ -66,11 +72,19 @@ class SearchState {
 class SearchNotifier extends StateNotifier<SearchState> {
   final RomDatabaseService _db;
   final MobyScoreIndex Function() _index;
+  final List<String> Function() _excludeTerms;
   List<RomEntry>? _filteredAll;
+  int _request = 0;
 
-  SearchNotifier(this._db, this._index) : super(const SearchState());
+  SearchNotifier(this._db, this._index, this._excludeTerms)
+    : super(const SearchState());
+
+  bool get _usesLocalList =>
+      state.mobyScoreOnly || state.oneGameOneRom || _excludeTerms().isNotEmpty;
 
   Future<void> search({String? query}) async {
+    final request = ++_request;
+    _filteredAll = null;
     state = state.copyWith(
       query: query ?? state.query,
       isLoading: true,
@@ -80,8 +94,10 @@ class SearchNotifier extends StateNotifier<SearchState> {
 
     try {
       final result = await _load(page: 1);
+      if (request != _request) return;
       state = state.copyWith(result: result, isLoading: false);
     } catch (error) {
+      if (request != _request) return;
       state = state.copyWith(error: error, isLoading: false);
     }
   }
@@ -115,28 +131,21 @@ class SearchNotifier extends StateNotifier<SearchState> {
 
   Future<SearchResult> _load({required int page}) async {
     const pageSize = 100;
-    if (!state.mobyScoreOnly) {
+    if (!_usesLocalList) {
       _filteredAll = null;
       return _db.search(
         query: state.query.isEmpty ? null : state.query,
         platforms: state.selectedPlatforms.isEmpty
             ? null
             : state.selectedPlatforms,
-        regions:
-            state.selectedRegions.isEmpty ? null : state.selectedRegions,
+        regions: state.selectedRegions.isEmpty ? null : state.selectedRegions,
         retroAchievementsOnly: state.retroAchievementsOnly,
         page: page,
         maxResults: pageSize,
       );
     }
 
-    _filteredAll ??= _applyScores(await _db.listMatches(
-      query: state.query.isEmpty ? null : state.query,
-      platforms:
-          state.selectedPlatforms.isEmpty ? null : state.selectedPlatforms,
-      regions: state.selectedRegions.isEmpty ? null : state.selectedRegions,
-      retroAchievementsOnly: state.retroAchievementsOnly,
-    ));
+    _filteredAll ??= _narrow(await _listedMatches());
     final all = _filteredAll!;
     final start = (page - 1) * pageSize;
     final end = start + pageSize;
@@ -153,16 +162,34 @@ class SearchNotifier extends StateNotifier<SearchState> {
     );
   }
 
+  Future<List<RomEntry>> _listedMatches() {
+    return _db.listMatches(
+      query: state.query.isEmpty ? null : state.query,
+      platforms: state.selectedPlatforms.isEmpty
+          ? null
+          : state.selectedPlatforms,
+      regions: state.selectedRegions.isEmpty ? null : state.selectedRegions,
+      retroAchievementsOnly: state.retroAchievementsOnly,
+    );
+  }
+
+  List<RomEntry> _narrow(List<RomEntry> entries) {
+    final terms = _excludeTerms();
+    var list = entries;
+    if (terms.isNotEmpty) {
+      list = list.where((entry) => !titleExcluded(entry.title, terms)).toList();
+    }
+    if (state.mobyScoreOnly) list = _applyScores(list);
+    if (state.oneGameOneRom) list = pickOnePerGame(list);
+    return list;
+  }
+
   List<RomEntry> _applyScores(List<RomEntry> entries) {
     final index = _index();
     final minimum = state.minimumMobyScore <= 0 ? null : state.minimumMobyScore;
     return entries
         .where(
-          (entry) => index.keep(
-            entry.platform,
-            entry.title,
-            minimum: minimum,
-          ),
+          (entry) => index.keep(entry.platform, entry.title, minimum: minimum),
         )
         .toList();
   }
@@ -170,26 +197,24 @@ class SearchNotifier extends StateNotifier<SearchState> {
   void invalidateScoreFilter() {
     if (!state.mobyScoreOnly) return;
     _filteredAll = null;
-    search();
+    if (state.result != null) search();
+  }
+
+  void invalidateExcludeTerms() {
+    _filteredAll = null;
+    if (state.result != null) search();
   }
 
   Future<List<String>> resolveSelectedSlugs() async {
     final selection = state.selection;
     if (!selection.active) return const [];
     if (!selection.all) return selection.picked.toList();
-    final all = _filteredAll ??
-        await _db.listMatches(
-          query: state.query.isEmpty ? null : state.query,
-          platforms: state.selectedPlatforms.isEmpty
-              ? null
-              : state.selectedPlatforms,
-          regions:
-              state.selectedRegions.isEmpty ? null : state.selectedRegions,
-          retroAchievementsOnly: state.retroAchievementsOnly,
-        );
-    final slugs = state.mobyScoreOnly
-        ? _applyScores(all).map((entry) => entry.slug)
-        : all.map((entry) => entry.slug);
+    final all =
+        _filteredAll ??
+        (_usesLocalList
+            ? _narrow(await _listedMatches())
+            : await _listedMatches());
+    final slugs = all.map((entry) => entry.slug);
     return slugs.where((slug) => !selection.excluded.contains(slug)).toList();
   }
 
@@ -234,6 +259,11 @@ class SearchNotifier extends StateNotifier<SearchState> {
     state = state.copyWith(minimumMobyScore: value);
   }
 
+  void setOneGameOneRom(bool value) {
+    _filteredAll = null;
+    state = state.copyWith(oneGameOneRom: value);
+  }
+
   void clearFilters() {
     _filteredAll = null;
     state = state.copyWith(
@@ -242,6 +272,7 @@ class SearchNotifier extends StateNotifier<SearchState> {
       retroAchievementsOnly: false,
       mobyScoreOnly: false,
       minimumMobyScore: 0,
+      oneGameOneRom: false,
     );
   }
 
@@ -255,12 +286,22 @@ final searchProvider = StateNotifierProvider<SearchNotifier, SearchState>((
   ref,
 ) {
   final db = ref.watch(romDatabaseProvider);
-  final notifier = SearchNotifier(db, () => ref.read(mobySyncProvider).index);
+  final notifier = SearchNotifier(
+    db,
+    () => ref.read(mobySyncProvider).index,
+    () => ref.read(settingsProvider).excludeTerms,
+  );
   ref.listen(mobySyncProvider.select((sync) => sync.indexRevision), (
     previous,
     next,
   ) {
     if (previous != next) notifier.invalidateScoreFilter();
   });
+  ref.listen(
+    settingsProvider.select((settings) => settings.excludeTerms.join('\u0001')),
+    (previous, next) {
+      if (previous != next) notifier.invalidateExcludeTerms();
+    },
+  );
   return notifier;
 });

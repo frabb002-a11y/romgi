@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../utils/rom_pick.dart';
+
 enum AppThemeMode { system, light, dark }
 
 class SettingsState {
@@ -18,6 +20,7 @@ class SettingsState {
   final String debridProviderId;
   final bool metadataEnabled;
   final double mobyStopScore;
+  final List<String> excludeTerms;
   final bool isLoading;
 
   const SettingsState({
@@ -34,6 +37,7 @@ class SettingsState {
     this.debridProviderId = 'torbox',
     this.metadataEnabled = true,
     this.mobyStopScore = 0,
+    this.excludeTerms = defaultExcludeTerms,
     this.isLoading = false,
   });
 
@@ -57,6 +61,7 @@ class SettingsState {
     String? debridProviderId,
     bool? metadataEnabled,
     double? mobyStopScore,
+    List<String>? excludeTerms,
     bool? isLoading,
   }) {
     return SettingsState(
@@ -77,6 +82,7 @@ class SettingsState {
       debridProviderId: debridProviderId ?? this.debridProviderId,
       metadataEnabled: metadataEnabled ?? this.metadataEnabled,
       mobyStopScore: mobyStopScore ?? this.mobyStopScore,
+      excludeTerms: excludeTerms ?? this.excludeTerms,
       isLoading: isLoading ?? this.isLoading,
     );
   }
@@ -112,6 +118,7 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
   static const String _keyDebridProviderId = 'debrid_provider_id';
   static const String _keyMetadataEnabled = 'metadata_enabled';
   static const String _keyMobyStopScore = 'moby_stop_score';
+  static const String _keyExcludeTerms = 'exclude_terms';
 
   SettingsNotifier() : super(const SettingsState()) {
     _loadSettings();
@@ -137,15 +144,16 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     final maxConcurrentDownloads =
         prefs.getInt(_keyMaxConcurrentDownloads) ?? 3;
     final torrentsDisabled = prefs.getBool(_keyTorrentsDisabled) ?? false;
-    final autoExtractDisabled =
-        prefs.getBool(_keyAutoExtractDisabled) ?? false;
+    final autoExtractDisabled = prefs.getBool(_keyAutoExtractDisabled) ?? false;
     final debridEnabled = prefs.getBool(_keyDebridEnabled) ?? false;
-    final debridProviderId =
-        prefs.getString(_keyDebridProviderId) ?? 'torbox';
+    final debridProviderId = prefs.getString(_keyDebridProviderId) ?? 'torbox';
     final metadataEnabled = prefs.getBool(_keyMetadataEnabled) ?? true;
     final mobyStopScore = (prefs.getDouble(_keyMobyStopScore) ?? 0)
         .clamp(0, 10)
         .toDouble();
+    final excludeTerms = normalizeExcludeTerms(
+      prefs.getStringList(_keyExcludeTerms) ?? defaultExcludeTerms,
+    );
 
     // Load platform-specific paths
     final platformPaths = <String, String>{};
@@ -175,6 +183,7 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
       debridProviderId: debridProviderId,
       metadataEnabled: metadataEnabled,
       mobyStopScore: mobyStopScore,
+      excludeTerms: excludeTerms,
       isLoading: false,
     );
   }
@@ -226,7 +235,10 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     state = state.copyWith(defaultRegions: regions);
   }
 
-  Future<void> setPlatformExtractDisabled(String platform, bool disabled) async {
+  Future<void> setPlatformExtractDisabled(
+    String platform,
+    bool disabled,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     final key = '$_keyExtractDisabledPlatforms$platform';
     final updated = Set<String>.from(state.extractDisabledPlatforms);
@@ -270,6 +282,13 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     state = state.copyWith(metadataEnabled: value);
   }
 
+  Future<void> setExcludeTerms(List<String> terms) async {
+    final normalized = normalizeExcludeTerms(terms);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyExcludeTerms, normalized);
+    state = state.copyWith(excludeTerms: normalized);
+  }
+
   Future<void> setMobyStopScore(double value) async {
     final clamped = value.clamp(0, 10).toDouble();
     final prefs = await SharedPreferences.getInstance();
@@ -297,6 +316,7 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     await prefs.remove(_keyDebridProviderId);
     await prefs.remove(_keyMetadataEnabled);
     await prefs.remove(_keyMobyStopScore);
+    await prefs.remove(_keyExcludeTerms);
 
     for (final key in prefs.getKeys().toList()) {
       if (key.startsWith(_keyPlatformPaths) ||

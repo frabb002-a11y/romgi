@@ -15,6 +15,7 @@ class MobySettingsSection extends ConsumerStatefulWidget {
 
 class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
   String _query = '';
+  final _checked = <String>{};
 
   @override
   Widget build(BuildContext context) {
@@ -34,9 +35,9 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: Text(
             'Builds a local score list from public MobyGames pages, one page '
-            'per second. The first page may ask for a browser check. Pick a '
-            'platform when you want it. Browse only filters platforms whose '
-            'build has finished.',
+            'per second. The first page may ask for a browser check. Check '
+            'several platforms to walk them in order. Browse only filters '
+            'platforms whose build has finished.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
@@ -77,7 +78,8 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
                 Expanded(
                   child: Text(
                     'Reading page ${sync.activePage + 1}'
-                    '${sync.activePlatform == null ? '' : ' of ${PlatformNames.getDisplayName(sync.activePlatform!)}'}',
+                    '${sync.activePlatform == null ? '' : ' of ${PlatformNames.getDisplayName(sync.activePlatform!)}'}'
+                    '${sync.activePlatform == null ? '' : ' · ${sync.platforms[sync.activePlatform!]?.stored ?? 0} titles'}',
                   ),
                 ),
                 TextButton(
@@ -103,7 +105,51 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
               isDense: true,
               prefixIcon: Icon(Icons.search),
             ),
-            onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
+            onChanged: (value) =>
+                setState(() => _query = value.trim().toLowerCase()),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              TextButton(
+                onPressed: sync.running || platforms.isEmpty
+                    ? null
+                    : () => setState(() {
+                        final allShown = platforms.every(_checked.contains);
+                        if (allShown) {
+                          _checked.removeAll(platforms);
+                        } else {
+                          _checked.addAll(platforms);
+                        }
+                      }),
+                child: Text(
+                  platforms.isNotEmpty && platforms.every(_checked.contains)
+                      ? 'Clear shown'
+                      : 'Select shown',
+                ),
+              ),
+              TextButton(
+                onPressed: sync.running || _checked.isEmpty
+                    ? null
+                    : () => _run(MobyJobKind.build),
+                child: const Text('Build'),
+              ),
+              TextButton(
+                onPressed: sync.running || _checked.isEmpty
+                    ? null
+                    : () => _run(MobyJobKind.continueJob),
+                child: const Text('Continue'),
+              ),
+              TextButton(
+                onPressed: sync.running || _checked.isEmpty
+                    ? null
+                    : () => _run(MobyJobKind.rebuild),
+                child: const Text('Rebuild'),
+              ),
+            ],
           ),
         ),
         for (final id in platforms)
@@ -113,9 +159,31 @@ class _MobySettingsSectionState extends ConsumerState<MobySettingsSection> {
             progress: sync.platforms[id],
             busy: sync.running,
             active: sync.running && sync.activePlatform == id,
+            checked: _checked.contains(id),
+            onChecked: (value) => setState(() {
+              if (value) {
+                _checked.add(id);
+              } else {
+                _checked.remove(id);
+              }
+            }),
           ),
       ],
     );
+  }
+
+  void _run(MobyJobKind kind) {
+    final ids = [
+      for (final id in mobyPlatformsToSync(full: true))
+        if (_checked.contains(id)) id,
+    ];
+    ref
+        .read(mobySyncProvider.notifier)
+        .runPlatforms(
+          ids,
+          cutoff: ref.read(settingsProvider).mobyStopScore,
+          kind: kind,
+        );
   }
 }
 
@@ -125,6 +193,8 @@ class _PlatformTile extends ConsumerWidget {
   final MobyPlatformProgress? progress;
   final bool busy;
   final bool active;
+  final bool checked;
+  final ValueChanged<bool> onChecked;
 
   const _PlatformTile({
     required this.id,
@@ -132,6 +202,8 @@ class _PlatformTile extends ConsumerWidget {
     required this.progress,
     required this.busy,
     required this.active,
+    required this.checked,
+    required this.onChecked,
   });
 
   @override
@@ -145,16 +217,18 @@ class _PlatformTile extends ConsumerWidget {
     final canRebuild = !busy && current != null;
 
     return ListTile(
+      leading: Checkbox(
+        value: checked,
+        onChanged: busy ? null : (value) => onChecked(value ?? false),
+      ),
       title: Text(PlatformNames.getDisplayName(id)),
       subtitle: Text(_status(current, active: active)),
       trailing: PopupMenuButton<MobyJobKind>(
         enabled: canBuild || canContinue || canRebuild,
         onSelected: (kind) {
-          ref.read(mobySyncProvider.notifier).runPlatform(
-            id,
-            cutoff: cutoff,
-            kind: kind,
-          );
+          ref
+              .read(mobySyncProvider.notifier)
+              .runPlatform(id, cutoff: cutoff, kind: kind);
         },
         itemBuilder: (context) => [
           if (canBuild)
