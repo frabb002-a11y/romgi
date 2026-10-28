@@ -1,4 +1,4 @@
-/// Key used to match a ROM title to a MobyGames title locally.
+/// Key used to match a ROM title to a cached IGDB title locally.
 /// Region tags, disc markers, and dump flags live in brackets, so they
 /// are stripped before the comparison.
 String mobyTitleKey(String title) {

@@ -1,11 +1,11 @@
-import 'moby_platforms.dart';
+import 'igdb_platforms.dart';
 import 'moby_titles.dart';
 
-class MobyScoreIndex {
+class ScoreIndex {
   final Map<String, double> scores;
   final Set<String> completePlatforms;
 
-  const MobyScoreIndex({
+  const ScoreIndex({
     this.scores = const {},
     this.completePlatforms = const {},
   });
@@ -14,14 +14,14 @@ class MobyScoreIndex {
       '$canonicalPlatform|${mobyTitleKey(title)}';
 
   bool isComplete(String romgiPlatform) {
-    final canonical = canonicalMobyPlatform(romgiPlatform);
+    final canonical = canonicalIgdbPlatform(romgiPlatform);
     if (canonical == null) return false;
     return completePlatforms.contains(canonical);
   }
 
-  /// Null when the platform walk has not finished, or the title has no score.
+  /// Null when this platform was not finished in Setup, or the title has no score.
   double? lookup(String romgiPlatform, String title) {
-    final canonical = canonicalMobyPlatform(romgiPlatform);
+    final canonical = canonicalIgdbPlatform(romgiPlatform);
     if (canonical == null || !completePlatforms.contains(canonical)) {
       return null;
     }

@@ -16,8 +16,8 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
   late Set<String> _selectedPlatforms;
   late Set<String> _selectedRegions;
   late bool _retroAchievementsOnly;
-  late bool _mobyScoreOnly;
-  late double _minimumMobyScore;
+  late bool _scoreOnly;
+  late double _minimumScore;
   late bool _oneGameOneRom;
   late List<String> _excludeTerms;
   final _termController = TextEditingController();
@@ -30,8 +30,8 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
     _selectedPlatforms = searchState.selectedPlatforms.toSet();
     _selectedRegions = searchState.selectedRegions.toSet();
     _retroAchievementsOnly = searchState.retroAchievementsOnly;
-    _mobyScoreOnly = searchState.mobyScoreOnly;
-    _minimumMobyScore = searchState.minimumMobyScore;
+    _scoreOnly = searchState.scoreOnly;
+    _minimumScore = searchState.minimumScore;
     _oneGameOneRom = searchState.oneGameOneRom;
     _excludeTerms = List.of(ref.read(settingsProvider).excludeTerms);
   }
@@ -96,8 +96,8 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                           _selectedPlatforms.clear();
                           _selectedRegions.clear();
                           _retroAchievementsOnly = false;
-                          _mobyScoreOnly = false;
-                          _minimumMobyScore = 0;
+                          _scoreOnly = false;
+                          _minimumScore = 0;
                           _oneGameOneRom = false;
                         });
                       },
@@ -178,35 +178,35 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                     const SizedBox(height: 24),
 
                     Text(
-                      'MobyGames score',
+                      'IGDB score',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Only platforms whose score list has finished are filtered. '
+                      'Only platforms finished in IGDB Setup are filtered. '
                       'The rest stay in the results.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Has a score'),
-                      value: _mobyScoreOnly,
+                      value: _scoreOnly,
                       onChanged: (value) =>
-                          setState(() => _mobyScoreOnly = value),
+                          setState(() => _scoreOnly = value),
                     ),
                     Text(
-                      _minimumMobyScore <= 0
+                      _minimumScore <= 0
                           ? 'Any score'
-                          : 'At least ${_minimumMobyScore.toStringAsFixed(1)}',
+                          : 'At least ${_minimumScore.toStringAsFixed(0)}',
                     ),
                     Slider(
-                      value: _minimumMobyScore,
+                      value: _minimumScore,
                       min: 0,
-                      max: 10,
+                      max: 100,
                       divisions: 20,
-                      label: _minimumMobyScore.toStringAsFixed(1),
-                      onChanged: _mobyScoreOnly
-                          ? (value) => setState(() => _minimumMobyScore = value)
+                      label: _minimumScore.toStringAsFixed(0),
+                      onChanged: _scoreOnly
+                          ? (value) => setState(() => _minimumScore = value)
                           : null,
                     ),
 
@@ -315,8 +315,8 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                           ..setSelectedPlatforms(_selectedPlatforms.toList())
                           ..setSelectedRegions(_selectedRegions.toList())
                           ..setRetroAchievementsOnly(_retroAchievementsOnly)
-                          ..setMobyScoreOnly(_mobyScoreOnly)
-                          ..setMinimumMobyScore(_minimumMobyScore)
+                          ..setScoreOnly(_scoreOnly)
+                          ..setMinimumScore(_minimumScore)
                           ..setOneGameOneRom(_oneGameOneRom)
                           ..search();
                         Navigator.pop(context);

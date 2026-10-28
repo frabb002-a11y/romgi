@@ -1,17 +1,17 @@
 import 'dart:convert';
 
-/// A MobyGames score list that can move between devices.
+/// An IGDB score list that can move between devices.
 /// Import merges into the database already on the device.
-const mobyTransferKind = 'romgi-moby';
-const mobyTransferVersion = 1;
+const igdbTransferKind = 'romgi-igdb';
+const igdbTransferVersion = 1;
 
-class MobyScoreRow {
+class IgdbScoreRow {
   final String platform;
   final String titleKey;
   final double score;
   final int gameId;
 
-  const MobyScoreRow({
+  const IgdbScoreRow({
     required this.platform,
     required this.titleKey,
     required this.score,
@@ -26,13 +26,13 @@ class MobyScoreRow {
   };
 }
 
-class MobySyncRow {
+class IgdbSyncRow {
   final String platform;
   final int pageOffset;
   final bool complete;
   final double cutoff;
 
-  const MobySyncRow({
+  const IgdbSyncRow({
     required this.platform,
     required this.pageOffset,
     required this.complete,
@@ -40,26 +40,26 @@ class MobySyncRow {
   });
 }
 
-class MobyTransfer {
-  final List<MobyScoreRow> scores;
-  final List<MobySyncRow> sync;
+class IgdbTransfer {
+  final List<IgdbScoreRow> scores;
+  final List<IgdbSyncRow> sync;
 
-  const MobyTransfer({required this.scores, required this.sync});
+  const IgdbTransfer({required this.scores, required this.sync});
 }
 
-class MobyTransferException implements Exception {
+class IgdbTransferException implements Exception {
   final String message;
 
-  const MobyTransferException(this.message);
+  const IgdbTransferException(this.message);
 
   @override
   String toString() => message;
 }
 
-String encodeMobyTransfer(MobyTransfer transfer) {
+String encodeIgdbTransfer(IgdbTransfer transfer) {
   return const JsonEncoder.withIndent('  ').convert({
-    'kind': mobyTransferKind,
-    'version': mobyTransferVersion,
+    'kind': igdbTransferKind,
+    'version': igdbTransferVersion,
     'scores': [
       for (final row in transfer.scores)
         {
@@ -81,37 +81,37 @@ String encodeMobyTransfer(MobyTransfer transfer) {
   });
 }
 
-MobyTransfer parseMobyTransfer(String source) {
+IgdbTransfer parseIgdbTransfer(String source) {
   final Object? decoded;
   try {
     decoded = jsonDecode(source);
   } on FormatException {
-    throw const MobyTransferException('That file is not a Romgi score list.');
+    throw const IgdbTransferException('That file is not a Romgi score list.');
   }
   if (decoded is! Map) {
-    throw const MobyTransferException('That file is not a Romgi score list.');
+    throw const IgdbTransferException('That file is not a Romgi score list.');
   }
   final json = decoded.cast<Object?, Object?>();
-  if (json['kind'] != mobyTransferKind) {
-    throw const MobyTransferException('That file is not a Romgi score list.');
+  if (json['kind'] != igdbTransferKind) {
+    throw const IgdbTransferException('That file is not a Romgi score list.');
   }
   final version = json['version'];
-  if (version is! int || version != mobyTransferVersion) {
-    throw const MobyTransferException(
+  if (version is! int || version != igdbTransferVersion) {
+    throw const IgdbTransferException(
       'This Romgi build cannot read that score list.',
     );
   }
-  return MobyTransfer(
+  return IgdbTransfer(
     scores: _scores(json['scores']),
     sync: _sync(json['sync']),
   );
 }
 
-/// Keeps a finished walk. A higher page wins when both walks are unfinished.
+/// Keeps a finished pull. A higher offset wins when both pulls are unfinished.
 /// The higher score for a title is applied separately by the database.
-List<MobySyncRow> mergeMobySync({
-  required Iterable<MobySyncRow> local,
-  required Iterable<MobySyncRow> imported,
+List<IgdbSyncRow> mergeIgdbSync({
+  required Iterable<IgdbSyncRow> local,
+  required Iterable<IgdbSyncRow> imported,
 }) {
   final byPlatform = {for (final row in local) row.platform: row};
   for (final row in imported) {
@@ -125,12 +125,12 @@ List<MobySyncRow> mergeMobySync({
   return merged;
 }
 
-MobySyncRow _mergeSync(MobySyncRow local, MobySyncRow imported) {
+IgdbSyncRow _mergeSync(IgdbSyncRow local, IgdbSyncRow imported) {
   final complete = local.complete || imported.complete;
   final pageOffset = imported.pageOffset > local.pageOffset
       ? imported.pageOffset
       : local.pageOffset;
-  return MobySyncRow(
+  return IgdbSyncRow(
     platform: local.platform,
     pageOffset: pageOffset,
     complete: complete,
@@ -138,7 +138,7 @@ MobySyncRow _mergeSync(MobySyncRow local, MobySyncRow imported) {
   );
 }
 
-double _mergedCutoff(MobySyncRow local, MobySyncRow imported) {
+double _mergedCutoff(IgdbSyncRow local, IgdbSyncRow imported) {
   if (imported.complete && !local.complete) return imported.cutoff;
   if (local.complete && !imported.complete) return local.cutoff;
   if (local.complete && imported.complete) {
@@ -149,14 +149,14 @@ double _mergedCutoff(MobySyncRow local, MobySyncRow imported) {
       : local.cutoff;
 }
 
-List<MobyScoreRow> _scores(Object? raw) {
+List<IgdbScoreRow> _scores(Object? raw) {
   if (raw is! List) {
-    throw const MobyTransferException('That file is not a Romgi score list.');
+    throw const IgdbTransferException('That file is not a Romgi score list.');
   }
-  final rows = <MobyScoreRow>[];
+  final rows = <IgdbScoreRow>[];
   for (final item in raw) {
     if (item is! Map) {
-      throw const MobyTransferException('That file is not a Romgi score list.');
+      throw const IgdbTransferException('That file is not a Romgi score list.');
     }
     final json = item.cast<Object?, Object?>();
     final platform = json['platform'];
@@ -169,10 +169,10 @@ List<MobyScoreRow> _scores(Object? raw) {
         titleKey.isEmpty ||
         score is! num ||
         gameId is! int) {
-      throw const MobyTransferException('That file is not a Romgi score list.');
+      throw const IgdbTransferException('That file is not a Romgi score list.');
     }
     rows.add(
-      MobyScoreRow(
+      IgdbScoreRow(
         platform: platform,
         titleKey: titleKey,
         score: score.toDouble(),
@@ -183,14 +183,14 @@ List<MobyScoreRow> _scores(Object? raw) {
   return rows;
 }
 
-List<MobySyncRow> _sync(Object? raw) {
+List<IgdbSyncRow> _sync(Object? raw) {
   if (raw is! List) {
-    throw const MobyTransferException('That file is not a Romgi score list.');
+    throw const IgdbTransferException('That file is not a Romgi score list.');
   }
-  final rows = <MobySyncRow>[];
+  final rows = <IgdbSyncRow>[];
   for (final item in raw) {
     if (item is! Map) {
-      throw const MobyTransferException('That file is not a Romgi score list.');
+      throw const IgdbTransferException('That file is not a Romgi score list.');
     }
     final json = item.cast<Object?, Object?>();
     final platform = json['platform'];
@@ -202,10 +202,10 @@ List<MobySyncRow> _sync(Object? raw) {
         pageOffset is! int ||
         complete is! bool ||
         cutoff is! num) {
-      throw const MobyTransferException('That file is not a Romgi score list.');
+      throw const IgdbTransferException('That file is not a Romgi score list.');
     }
     rows.add(
-      MobySyncRow(
+      IgdbSyncRow(
         platform: platform,
         pageOffset: pageOffset,
         complete: complete,

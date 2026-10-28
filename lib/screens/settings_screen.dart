@@ -9,7 +9,7 @@ import '../services/rom_database_service.dart';
 import '../services/storage_service.dart';
 import '../utils/utils.dart';
 import 'internet_archive_login_screen.dart';
-import 'moby_settings_section.dart';
+import 'igdb_settings_section.dart';
 import 'sources_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -112,8 +112,8 @@ class SettingsScreen extends ConsumerWidget {
 
                 const Divider(height: 32),
 
-                _SectionHeader(title: 'MobyGames'),
-                const MobySettingsSection(),
+                _SectionHeader(title: 'IGDB scores'),
+                const IgdbSettingsSection(),
 
                 const Divider(height: 32),
 

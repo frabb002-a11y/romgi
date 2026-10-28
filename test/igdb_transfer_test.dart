@@ -1,73 +1,75 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:romgi/services/metadata/moby_transfer.dart';
+import 'package:romgi/services/metadata/igdb_transfer.dart';
 
 void main() {
   test('a score list round-trips and rejects other files', () {
-    final encoded = encodeMobyTransfer(
-      const MobyTransfer(
+    final encoded = encodeIgdbTransfer(
+      const IgdbTransfer(
         scores: [
-          MobyScoreRow(
+          IgdbScoreRow(
             platform: 'snes',
             titleKey: 'chrono trigger',
-            score: 9.1,
+            score: 91,
             gameId: 12,
           ),
         ],
         sync: [
-          MobySyncRow(
+          IgdbSyncRow(
             platform: 'snes',
-            pageOffset: 3,
+            pageOffset: 500,
             complete: true,
-            cutoff: 7,
+            cutoff: 70,
           ),
         ],
       ),
     );
 
-    final parsed = parseMobyTransfer(encoded);
+    final parsed = parseIgdbTransfer(encoded);
     expect(parsed.scores.single.titleKey, 'chrono trigger');
-    expect(parsed.scores.single.score, 9.1);
+    expect(parsed.scores.single.score, 91);
     expect(parsed.sync.single.complete, isTrue);
-    expect(parsed.sync.single.pageOffset, 3);
+    expect(parsed.sync.single.pageOffset, 500);
 
     expect(
-      () => parseMobyTransfer('{"kind":"other","version":1,"scores":[],"sync":[]}'),
-      throwsA(isA<MobyTransferException>()),
+      () => parseIgdbTransfer(
+        '{"kind":"romgi-moby","version":1,"scores":[],"sync":[]}',
+      ),
+      throwsA(isA<IgdbTransferException>()),
     );
   });
 
-  test('import keeps a finished walk and the further unfinished page', () {
-    final merged = mergeMobySync(
+  test('import keeps a finished pull and the further unfinished page', () {
+    final merged = mergeIgdbSync(
       local: const [
-        MobySyncRow(
+        IgdbSyncRow(
           platform: 'nes',
-          pageOffset: 1,
+          pageOffset: 0,
           complete: false,
           cutoff: 0,
         ),
-        MobySyncRow(
+        IgdbSyncRow(
           platform: 'snes',
-          pageOffset: 4,
+          pageOffset: 500,
           complete: true,
-          cutoff: 8,
+          cutoff: 80,
         ),
       ],
       imported: const [
-        MobySyncRow(
+        IgdbSyncRow(
           platform: 'nes',
-          pageOffset: 6,
+          pageOffset: 500,
           complete: true,
-          cutoff: 7,
+          cutoff: 70,
         ),
-        MobySyncRow(
+        IgdbSyncRow(
           platform: 'snes',
-          pageOffset: 2,
+          pageOffset: 0,
           complete: true,
-          cutoff: 6,
+          cutoff: 60,
         ),
-        MobySyncRow(
+        IgdbSyncRow(
           platform: 'gba',
-          pageOffset: 2,
+          pageOffset: 500,
           complete: false,
           cutoff: 0,
         ),
@@ -76,11 +78,11 @@ void main() {
 
     final byPlatform = {for (final row in merged) row.platform: row};
     expect(byPlatform['nes']!.complete, isTrue);
-    expect(byPlatform['nes']!.pageOffset, 6);
-    expect(byPlatform['nes']!.cutoff, 7);
+    expect(byPlatform['nes']!.pageOffset, 500);
+    expect(byPlatform['nes']!.cutoff, 70);
     expect(byPlatform['snes']!.complete, isTrue);
-    expect(byPlatform['snes']!.cutoff, 6);
-    expect(byPlatform['gba']!.pageOffset, 2);
+    expect(byPlatform['snes']!.cutoff, 60);
+    expect(byPlatform['gba']!.pageOffset, 500);
     expect(byPlatform['gba']!.complete, isFalse);
   });
 }

@@ -276,7 +276,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
         searchState.selectedPlatforms.length +
         searchState.selectedRegions.length +
         (searchState.retroAchievementsOnly ? 1 : 0) +
-        (searchState.mobyScoreOnly ? 1 : 0) +
+        (searchState.scoreOnly ? 1 : 0) +
         (searchState.oneGameOneRom ? 1 : 0) +
         (excludeTerms.isNotEmpty ? 1 : 0);
     final selecting = searchState.selection.active;
@@ -379,19 +379,19 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
                           ),
                         ),
                       ),
-                      if (searchState.mobyScoreOnly)
+                      if (searchState.scoreOnly)
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: Chip(
                             label: Text(
-                              searchState.minimumMobyScore <= 0
-                                  ? 'Has MobyGames score'
-                                  : 'Score ${searchState.minimumMobyScore.toStringAsFixed(1)}+',
+                              searchState.minimumScore <= 0
+                                  ? 'Has IGDB score'
+                                  : 'Score ${searchState.minimumScore.toStringAsFixed(0)}+',
                             ),
                             onDeleted: () {
                               ref.read(searchProvider.notifier)
-                                ..setMobyScoreOnly(false)
-                                ..setMinimumMobyScore(0)
+                                ..setScoreOnly(false)
+                                ..setMinimumScore(0)
                                 ..search();
                             },
                             visualDensity: VisualDensity.compact,
@@ -504,7 +504,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
               const Text('No results found'),
               if (searchState.selectedPlatforms.isNotEmpty ||
                   searchState.selectedRegions.isNotEmpty ||
-                  searchState.mobyScoreOnly ||
+                  searchState.scoreOnly ||
                   searchState.oneGameOneRom ||
                   searchState.retroAchievementsOnly) ...[
                 const SizedBox(height: 8),
@@ -531,7 +531,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
   Widget _buildSliverList(List entries, SearchState searchState) {
     final downloadedSlugs = ref.watch(downloadedSlugsProvider);
     final downloadedSet = downloadedSlugs.valueOrNull ?? <String>{};
-    final scores = ref.watch(mobySyncProvider.select((sync) => sync.index));
+    final scores = ref.watch(igdbSyncProvider.select((sync) => sync.index));
 
     return SliverList(
       delegate: SliverChildBuilderDelegate((context, index) {
@@ -565,7 +565,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
   Widget _buildSliverGrid(List entries, SearchState searchState) {
     final downloadedSlugs = ref.watch(downloadedSlugsProvider);
     final downloadedSet = downloadedSlugs.valueOrNull ?? <String>{};
-    final scores = ref.watch(mobySyncProvider.select((sync) => sync.index));
+    final scores = ref.watch(igdbSyncProvider.select((sync) => sync.index));
 
     // Get screen width to calculate columns
     final screenWidth = MediaQuery.of(context).size.width;

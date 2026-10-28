@@ -6,7 +6,7 @@ import '../models/models.dart';
 class DatabaseService {
   static Database? _database;
   static const String _dbName = 'romgi.db';
-  static const int _dbVersion = 10;
+  static const int _dbVersion = 11;
 
   Future<Database> get database async {
     _database ??= await _initDatabase();
@@ -123,6 +123,10 @@ class DatabaseService {
       await db.execute(
         'ALTER TABLE moby_sync ADD COLUMN cutoff REAL NOT NULL DEFAULT 0',
       );
+    }
+    if (oldVersion < 11) {
+      await db.delete('moby_scores');
+      await db.delete('moby_sync');
     }
   }
 

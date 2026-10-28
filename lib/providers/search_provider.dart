@@ -1,11 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
-import '../services/metadata/moby_score_index.dart';
+import '../services/metadata/score_index.dart';
 import '../services/rom_database_service.dart';
 import '../utils/rom_pick.dart';
 import 'api_provider.dart';
-import 'moby_provider.dart';
+import 'igdb_provider.dart';
 import 'settings_provider.dart';
 
 class SearchState {
@@ -13,8 +13,8 @@ class SearchState {
   final List<String> selectedPlatforms;
   final List<String> selectedRegions;
   final bool retroAchievementsOnly;
-  final bool mobyScoreOnly;
-  final double minimumMobyScore;
+  final bool scoreOnly;
+  final double minimumScore;
   final bool oneGameOneRom;
   final SearchResult? result;
   final bool isLoading;
@@ -26,8 +26,8 @@ class SearchState {
     this.selectedPlatforms = const [],
     this.selectedRegions = const [],
     this.retroAchievementsOnly = false,
-    this.mobyScoreOnly = false,
-    this.minimumMobyScore = 0,
+    this.scoreOnly = false,
+    this.minimumScore = 0,
     this.oneGameOneRom = false,
     this.result,
     this.isLoading = false,
@@ -42,8 +42,8 @@ class SearchState {
     List<String>? selectedPlatforms,
     List<String>? selectedRegions,
     bool? retroAchievementsOnly,
-    bool? mobyScoreOnly,
-    double? minimumMobyScore,
+    bool? scoreOnly,
+    double? minimumScore,
     bool? oneGameOneRom,
     SearchResult? result,
     bool clearResult = false,
@@ -58,8 +58,8 @@ class SearchState {
       selectedRegions: selectedRegions ?? this.selectedRegions,
       retroAchievementsOnly:
           retroAchievementsOnly ?? this.retroAchievementsOnly,
-      mobyScoreOnly: mobyScoreOnly ?? this.mobyScoreOnly,
-      minimumMobyScore: minimumMobyScore ?? this.minimumMobyScore,
+      scoreOnly: scoreOnly ?? this.scoreOnly,
+      minimumScore: minimumScore ?? this.minimumScore,
       oneGameOneRom: oneGameOneRom ?? this.oneGameOneRom,
       result: clearResult ? null : (result ?? this.result),
       isLoading: isLoading ?? this.isLoading,
@@ -71,7 +71,7 @@ class SearchState {
 
 class SearchNotifier extends StateNotifier<SearchState> {
   final RomDatabaseService _db;
-  final MobyScoreIndex Function() _index;
+  final ScoreIndex Function() _index;
   final List<String> Function() _excludeTerms;
   List<RomEntry>? _filteredAll;
   int _request = 0;
@@ -80,7 +80,7 @@ class SearchNotifier extends StateNotifier<SearchState> {
     : super(const SearchState());
 
   bool get _usesLocalList =>
-      state.mobyScoreOnly || state.oneGameOneRom || _excludeTerms().isNotEmpty;
+      state.scoreOnly || state.oneGameOneRom || _excludeTerms().isNotEmpty;
 
   Future<void> search({String? query}) async {
     final request = ++_request;
@@ -195,14 +195,14 @@ class SearchNotifier extends StateNotifier<SearchState> {
     if (terms.isNotEmpty) {
       list = list.where((entry) => !titleExcluded(entry.title, terms)).toList();
     }
-    if (state.mobyScoreOnly) list = _applyScores(list);
+    if (state.scoreOnly) list = _applyScores(list);
     if (state.oneGameOneRom) list = pickOnePerGame(list);
     return list;
   }
 
   List<RomEntry> _applyScores(List<RomEntry> entries) {
     final index = _index();
-    final minimum = state.minimumMobyScore <= 0 ? null : state.minimumMobyScore;
+    final minimum = state.minimumScore <= 0 ? null : state.minimumScore;
     return entries
         .where(
           (entry) => index.keep(entry.platform, entry.title, minimum: minimum),
@@ -211,7 +211,7 @@ class SearchNotifier extends StateNotifier<SearchState> {
   }
 
   void invalidateScoreFilter() {
-    if (!state.mobyScoreOnly) return;
+    if (!state.scoreOnly) return;
     _filteredAll = null;
     if (state.result != null) search();
   }
@@ -265,14 +265,14 @@ class SearchNotifier extends StateNotifier<SearchState> {
     state = state.copyWith(retroAchievementsOnly: value);
   }
 
-  void setMobyScoreOnly(bool value) {
+  void setScoreOnly(bool value) {
     _filteredAll = null;
-    state = state.copyWith(mobyScoreOnly: value);
+    state = state.copyWith(scoreOnly: value);
   }
 
-  void setMinimumMobyScore(double value) {
+  void setMinimumScore(double value) {
     _filteredAll = null;
-    state = state.copyWith(minimumMobyScore: value);
+    state = state.copyWith(minimumScore: value);
   }
 
   void setOneGameOneRom(bool value) {
@@ -286,8 +286,8 @@ class SearchNotifier extends StateNotifier<SearchState> {
       selectedPlatforms: [],
       selectedRegions: [],
       retroAchievementsOnly: false,
-      mobyScoreOnly: false,
-      minimumMobyScore: 0,
+      scoreOnly: false,
+      minimumScore: 0,
       oneGameOneRom: false,
     );
   }
@@ -304,10 +304,10 @@ final searchProvider = StateNotifierProvider<SearchNotifier, SearchState>((
   final db = ref.watch(romDatabaseProvider);
   final notifier = SearchNotifier(
     db,
-    () => ref.read(mobySyncProvider).index,
+    () => ref.read(igdbSyncProvider).index,
     () => ref.read(settingsProvider).excludeTerms,
   );
-  ref.listen(mobySyncProvider.select((sync) => sync.indexRevision), (
+  ref.listen(igdbSyncProvider.select((sync) => sync.indexRevision), (
     previous,
     next,
   ) {

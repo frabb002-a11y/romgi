@@ -19,7 +19,7 @@ class SettingsState {
   final bool debridEnabled;
   final String debridProviderId;
   final bool metadataEnabled;
-  final double mobyStopScore;
+  final double igdbStopScore;
   final List<String> excludeTerms;
   final bool isLoading;
 
@@ -36,7 +36,7 @@ class SettingsState {
     this.debridEnabled = false,
     this.debridProviderId = 'torbox',
     this.metadataEnabled = true,
-    this.mobyStopScore = 0,
+    this.igdbStopScore = 0,
     this.excludeTerms = defaultExcludeTerms,
     this.isLoading = false,
   });
@@ -60,7 +60,7 @@ class SettingsState {
     bool? debridEnabled,
     String? debridProviderId,
     bool? metadataEnabled,
-    double? mobyStopScore,
+    double? igdbStopScore,
     List<String>? excludeTerms,
     bool? isLoading,
   }) {
@@ -81,7 +81,7 @@ class SettingsState {
       debridEnabled: debridEnabled ?? this.debridEnabled,
       debridProviderId: debridProviderId ?? this.debridProviderId,
       metadataEnabled: metadataEnabled ?? this.metadataEnabled,
-      mobyStopScore: mobyStopScore ?? this.mobyStopScore,
+      igdbStopScore: igdbStopScore ?? this.igdbStopScore,
       excludeTerms: excludeTerms ?? this.excludeTerms,
       isLoading: isLoading ?? this.isLoading,
     );
@@ -117,7 +117,7 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
   static const String _keyDebridEnabled = 'debrid_enabled';
   static const String _keyDebridProviderId = 'debrid_provider_id';
   static const String _keyMetadataEnabled = 'metadata_enabled';
-  static const String _keyMobyStopScore = 'moby_stop_score';
+  static const String _keyIgdbStopScore = 'igdb_stop_score';
   static const String _keyExcludeTerms = 'exclude_terms';
 
   SettingsNotifier() : super(const SettingsState()) {
@@ -148,8 +148,8 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     final debridEnabled = prefs.getBool(_keyDebridEnabled) ?? false;
     final debridProviderId = prefs.getString(_keyDebridProviderId) ?? 'torbox';
     final metadataEnabled = prefs.getBool(_keyMetadataEnabled) ?? true;
-    final mobyStopScore = (prefs.getDouble(_keyMobyStopScore) ?? 0)
-        .clamp(0, 10)
+    final igdbStopScore = (prefs.getDouble(_keyIgdbStopScore) ?? 0)
+        .clamp(0, 100)
         .toDouble();
     final excludeTerms = normalizeExcludeTerms(
       prefs.getStringList(_keyExcludeTerms) ?? defaultExcludeTerms,
@@ -182,7 +182,7 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
       debridEnabled: debridEnabled,
       debridProviderId: debridProviderId,
       metadataEnabled: metadataEnabled,
-      mobyStopScore: mobyStopScore,
+      igdbStopScore: igdbStopScore,
       excludeTerms: excludeTerms,
       isLoading: false,
     );
@@ -289,11 +289,11 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     state = state.copyWith(excludeTerms: normalized);
   }
 
-  Future<void> setMobyStopScore(double value) async {
-    final clamped = value.clamp(0, 10).toDouble();
+  Future<void> setIgdbStopScore(double value) async {
+    final clamped = value.clamp(0, 100).toDouble();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_keyMobyStopScore, clamped);
-    state = state.copyWith(mobyStopScore: clamped);
+    await prefs.setDouble(_keyIgdbStopScore, clamped);
+    state = state.copyWith(igdbStopScore: clamped);
   }
 
   Future<void> setMaxConcurrentDownloads(int value) async {
@@ -315,7 +315,7 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     await prefs.remove(_keyDebridEnabled);
     await prefs.remove(_keyDebridProviderId);
     await prefs.remove(_keyMetadataEnabled);
-    await prefs.remove(_keyMobyStopScore);
+    await prefs.remove(_keyIgdbStopScore);
     await prefs.remove(_keyExcludeTerms);
 
     for (final key in prefs.getKeys().toList()) {
