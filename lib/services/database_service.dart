@@ -6,7 +6,7 @@ import '../models/models.dart';
 class DatabaseService {
   static Database? _database;
   static const String _dbName = 'romgi.db';
-  static const int _dbVersion = 11;
+  static const int _dbVersion = 12;
 
   Future<Database> get database async {
     _database ??= await _initDatabase();
@@ -128,9 +128,40 @@ class DatabaseService {
       await db.delete('moby_scores');
       await db.delete('moby_sync');
     }
+    if (oldVersion < 12) {
+      await _createIgdbCatalogTables(db);
+      await db.delete('moby_scores');
+    }
+  }
+
+  Future<void> _createIgdbCatalogTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS igdb_games (
+        platform TEXT NOT NULL,
+        game_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        rating REAL NOT NULL,
+        rating_count INTEGER NOT NULL,
+        weighted REAL NOT NULL,
+        game_type INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (platform, game_id)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS igdb_title_keys (
+        platform TEXT NOT NULL,
+        title_key TEXT NOT NULL,
+        game_id INTEGER NOT NULL,
+        PRIMARY KEY (platform, title_key)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_igdb_title_keys_game ON igdb_title_keys(platform, game_id)',
+    );
   }
 
   Future<void> _createLibraryTables(Database db) async {
+    await _createIgdbCatalogTables(db);
     await db.execute('''
       CREATE TABLE IF NOT EXISTS library_ignores (
         path TEXT PRIMARY KEY
@@ -589,6 +620,48 @@ class DatabaseService {
     await db.delete('library_ignores', where: 'path = ?', whereArgs: [path]);
   }
 
+  Future<void> appendIgdbCatalogBatch({
+    required String platform,
+    required List<Map<String, Object?>> games,
+    required List<Map<String, Object?>> titleKeys,
+  }) async {
+    if (games.isEmpty && titleKeys.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final row in games) {
+      batch.insert(
+        'igdb_games',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    for (final row in titleKeys) {
+      batch.insert(
+        'igdb_title_keys',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> deleteIgdbPlatform(String platform) async {
+    final db = await database;
+    await db.delete('igdb_title_keys', where: 'platform = ?', whereArgs: [platform]);
+    await db.delete('igdb_games', where: 'platform = ?', whereArgs: [platform]);
+  }
+
+  Future<
+      ({
+        List<Map<String, Object?>> games,
+        List<Map<String, Object?>> titleKeys,
+      })> allIgdbCatalogRows() async {
+    final db = await database;
+    final games = await db.query('igdb_games');
+    final titleKeys = await db.query('igdb_title_keys');
+    return (games: games, titleKeys: titleKeys);
+  }
+
   Future<void> upsertMobyScores(List<Map<String, Object?>> rows) async {
     if (rows.isEmpty) return;
     final db = await database;
@@ -657,6 +730,7 @@ class DatabaseService {
 
   Future<void> deleteMobyPlatform(String platform) async {
     final db = await database;
+    await deleteIgdbPlatform(platform);
     await db.delete('moby_scores', where: 'platform = ?', whereArgs: [platform]);
     await db.delete('moby_sync', where: 'platform = ?', whereArgs: [platform]);
   }
@@ -673,7 +747,34 @@ class DatabaseService {
 
   Future<void> clearMobyScores() async {
     final db = await database;
+    await db.delete('igdb_title_keys');
+    await db.delete('igdb_games');
     await db.delete('moby_scores');
     await db.delete('moby_sync');
+  }
+
+  Future<void> importIgdbCatalog({
+    required List<Map<String, Object?>> games,
+    required List<Map<String, Object?>> titleKeys,
+  }) async {
+    await clearMobyScores();
+    if (games.isEmpty && titleKeys.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final row in games) {
+      batch.insert(
+        'igdb_games',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    for (final row in titleKeys) {
+      batch.insert(
+        'igdb_title_keys',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
   }
 }

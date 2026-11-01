@@ -2,28 +2,26 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/database_service.dart';
+import '../services/metadata/igdb_catalog_index.dart';
 import '../services/metadata/igdb_client.dart';
 import '../services/metadata/igdb_credentials.dart';
 import '../services/metadata/igdb_platforms.dart';
 import '../services/metadata/igdb_transfer.dart';
 import '../services/metadata/moby_titles.dart';
-import '../services/metadata/score_index.dart';
 import 'download_provider.dart';
 
 class IgdbPlatformProgress {
   final bool complete;
-  final double cutoff;
   final int stored;
 
   const IgdbPlatformProgress({
     required this.complete,
-    required this.cutoff,
     required this.stored,
   });
 }
 
 class IgdbSyncState {
-  final ScoreIndex index;
+  final IgdbCatalogIndex index;
   final int indexRevision;
   final Map<String, IgdbPlatformProgress> platforms;
   final List<IgdbGenre> genres;
@@ -34,7 +32,7 @@ class IgdbSyncState {
   final bool running;
 
   const IgdbSyncState({
-    this.index = const ScoreIndex(),
+    this.index = const IgdbCatalogIndex(),
     this.indexRevision = 0,
     this.platforms = const {},
     this.genres = const [],
@@ -49,7 +47,7 @@ class IgdbSyncState {
       platforms.values.fold(0, (sum, item) => sum + item.stored);
 
   IgdbSyncState copyWith({
-    ScoreIndex? index,
+    IgdbCatalogIndex? index,
     int? indexRevision,
     Map<String, IgdbPlatformProgress>? platforms,
     List<IgdbGenre>? genres,
@@ -116,18 +114,39 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
     String? error,
     bool clearError = false,
   }) async {
-    final scoreRows = await _db.allMobyScores();
+    final catalog = await _db.allIgdbCatalogRows();
     final sync = await _db.mobySyncStates();
     final auth = await _credentials.read();
-    final scores = <String, double>{};
-    final stored = <String, int>{};
-    for (final row in scoreRows) {
+
+    final gamesByPlatform = <String, Map<int, IgdbGameRecord>>{};
+    for (final row in catalog.games) {
+      final platform = row['platform'] as String? ?? '';
+      final gameId = row['game_id'] as int?;
+      if (platform.isEmpty || gameId == null) continue;
+      gamesByPlatform.putIfAbsent(platform, () => {})[gameId] = IgdbGameRecord(
+        platform: platform,
+        gameId: gameId,
+        name: row['name'] as String? ?? '',
+        rating: (row['rating'] as num?)?.toDouble() ?? 0,
+        ratingCount: row['rating_count'] as int? ?? 0,
+        weighted: (row['weighted'] as num?)?.toDouble() ?? 0,
+        gameType: row['game_type'] as int? ?? 0,
+      );
+    }
+
+    final titleKeyToGameId = <String, int>{};
+    for (final row in catalog.titleKeys) {
       final platform = row['platform'] as String? ?? '';
       final titleKey = row['title_key'] as String? ?? '';
-      final score = (row['score'] as num?)?.toDouble();
-      if (platform.isEmpty || titleKey.isEmpty || score == null) continue;
-      scores['$platform|$titleKey'] = score;
-      stored[platform] = (stored[platform] ?? 0) + 1;
+      final gameId = row['game_id'] as int?;
+      if (platform.isEmpty || titleKey.isEmpty || gameId == null) continue;
+      titleKeyToGameId[IgdbCatalogIndex.titleKeyLookupKey(platform, titleKey)] =
+          gameId;
+    }
+
+    final stored = <String, int>{};
+    for (final entry in gamesByPlatform.entries) {
+      stored[entry.key] = entry.value.length;
     }
 
     final platforms = <String, IgdbPlatformProgress>{};
@@ -135,7 +154,6 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
     for (final entry in sync.entries) {
       platforms[entry.key] = IgdbPlatformProgress(
         complete: entry.value.complete,
-        cutoff: entry.value.cutoff,
         stored: stored[entry.key] ?? 0,
       );
       if (entry.value.complete) complete.add(entry.key);
@@ -143,18 +161,18 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
     for (final entry in stored.entries) {
       platforms.putIfAbsent(
         entry.key,
-        () => IgdbPlatformProgress(
-          complete: false,
-          cutoff: 0,
-          stored: entry.value,
-        ),
+        () => IgdbPlatformProgress(complete: false, stored: entry.value),
       );
     }
 
     if (!mounted) return;
     final previous = state;
     state = IgdbSyncState(
-      index: ScoreIndex(scores: scores, completePlatforms: complete),
+      index: IgdbCatalogIndex(
+        gamesByPlatform: gamesByPlatform,
+        titleKeyToGameId: titleKeyToGameId,
+        completePlatforms: complete,
+      ),
       indexRevision: previous.indexRevision + 1,
       platforms: platforms,
       genres: previous.genres,
@@ -186,10 +204,10 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
     return genres;
   }
 
+  /// Upstream sync: full IGDB pool per platform (no score cutoff — filter in Browse).
   Future<void> runSetup({
     required List<String> platforms,
     required List<int> genreIds,
-    required double cutoff,
   }) async {
     if (state.running || platforms.isEmpty) return;
     final auth = await _credentials.read();
@@ -211,7 +229,6 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
         await _runPlatform(
           platform: platform,
           genreIds: genreIds,
-          cutoff: cutoff,
           auth: auth,
           runId: runId,
           token: token,
@@ -228,7 +245,6 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
   Future<void> _runPlatform({
     required String platform,
     required List<int> genreIds,
-    required double cutoff,
     required IgdbCredentials auth,
     required int runId,
     required CancelToken token,
@@ -236,7 +252,7 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
     final platformId = igdbPlatformIds[platform.toLowerCase()];
     if (platformId == null) return;
 
-    await _db.deleteMobyPlatform(platform);
+    await _db.deleteIgdbPlatform(platform);
     await _load(
       running: true,
       activePlatform: platform,
@@ -247,21 +263,48 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
     try {
       while (mounted && _generation == runId) {
         state = state.copyWith(activePlatform: platform, activeOffset: offset);
-        final games = await _client.games(
+        final page = await _client.poolPage(
           clientId: auth.clientId,
           clientSecret: auth.clientSecret,
           platformId: platformId,
           genreIds: genreIds,
-          minimumScore: cutoff,
           offset: offset,
           cancelToken: token,
         );
         if (!mounted || _generation != runId) return;
-        if (games.isNotEmpty) {
-          await _db.upsertMobyScores([
-            for (final game in games)
-              ..._rowsFor(platform, game),
-          ]);
+
+        if (page.isNotEmpty) {
+          final releaseFlags = await _client.releaseOnPlatform(
+            clientId: auth.clientId,
+            clientSecret: auth.clientSecret,
+            platformId: platformId,
+            gameIds: [for (final g in page) g.id],
+            cancelToken: token,
+          );
+          final onPlatform = page
+              .where((g) => releaseFlags[g.id] ?? false)
+              .toList();
+          if (onPlatform.isNotEmpty) {
+            await _db.appendIgdbCatalogBatch(
+              platform: platform,
+              games: [
+                for (final game in onPlatform)
+                  {
+                    'platform': platform,
+                    'game_id': game.id,
+                    'name': game.name,
+                    'rating': game.rating,
+                    'rating_count': game.ratingCount,
+                    'weighted': game.weighted,
+                    'game_type': game.gameType,
+                  },
+              ],
+              titleKeys: [
+                for (final game in onPlatform)
+                  ..._titleKeyRows(platform, game),
+              ],
+            );
+          }
           await _load(
             running: true,
             activePlatform: platform,
@@ -269,12 +312,13 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
             clearError: true,
           );
         }
-        if (games.length < 500) {
+
+        if (page.length < 500) {
           await _db.setMobySync(
             platform: platform,
             offset: offset,
             complete: true,
-            cutoff: cutoff,
+            cutoff: 0,
           );
           return;
         }
@@ -283,64 +327,79 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
           platform: platform,
           offset: offset,
           complete: false,
-          cutoff: cutoff,
+          cutoff: 0,
         );
       }
     } on DioException catch (error) {
       if (CancelToken.isCancel(error)) return;
-      await _fail(platform, offset, cutoff, 'Could not reach IGDB.');
+      await _fail(platform, offset);
     } on IgdbException catch (error) {
-      await _fail(platform, offset, cutoff, error.message);
+      await _fail(platform, offset, error.message);
     } catch (_) {
-      await _fail(platform, offset, cutoff, 'Could not reach IGDB.');
+      await _fail(platform, offset);
     }
   }
 
-  Future<void> _fail(
-    String platform,
-    int offset,
-    double cutoff,
-    String message,
-  ) async {
+  Future<void> _fail(String platform, int offset, [String? message]) async {
     await _db.setMobySync(
       platform: platform,
       offset: offset,
       complete: false,
-      cutoff: cutoff,
+      cutoff: 0,
     );
-    if (mounted) state = state.copyWith(error: message);
+    if (mounted) {
+      state = state.copyWith(
+        error: message ?? 'Could not reach IGDB.',
+      );
+    }
   }
 
-  List<Map<String, Object?>> _rowsFor(String platform, IgdbListedGame game) {
+  Iterable<Map<String, Object?>> _titleKeyRows(
+    String platform,
+    IgdbPoolGame game,
+  ) sync* {
     final seen = <String>{};
-    final rows = <Map<String, Object?>>[];
     for (final name in [game.name, ...game.alternativeNames]) {
       final titleKey = mobyTitleKey(name);
       if (titleKey.isEmpty || !seen.add(titleKey)) continue;
-      rows.add({
+      yield {
         'platform': platform,
         'title_key': titleKey,
-        'score': game.score,
         'game_id': game.id,
-      });
+      };
     }
-    return rows;
   }
 
   Future<IgdbTransfer> exportTransfer() async {
-    final scoreRows = await _db.allMobyScores();
+    final catalog = await _db.allIgdbCatalogRows();
     final sync = await _db.mobySyncStates();
     return IgdbTransfer(
-      scores: [
-        for (final row in scoreRows)
+      games: [
+        for (final row in catalog.games)
+          if (row['platform'] is String &&
+              row['game_id'] is int &&
+              row['name'] is String &&
+              row['rating'] is num &&
+              row['rating_count'] is int &&
+              row['weighted'] is num)
+            IgdbGameRow(
+              platform: row['platform'] as String,
+              gameId: row['game_id'] as int,
+              name: row['name'] as String,
+              rating: (row['rating'] as num).toDouble(),
+              ratingCount: row['rating_count'] as int,
+              weighted: (row['weighted'] as num).toDouble(),
+              gameType: row['game_type'] as int? ?? 0,
+            ),
+      ],
+      titleKeys: [
+        for (final row in catalog.titleKeys)
           if (row['platform'] is String &&
               row['title_key'] is String &&
-              row['score'] is num &&
               row['game_id'] is int)
-            IgdbScoreRow(
+            IgdbTitleKeyRow(
               platform: row['platform'] as String,
               titleKey: row['title_key'] as String,
-              score: (row['score'] as num).toDouble(),
               gameId: row['game_id'] as int,
             ),
       ],
@@ -356,35 +415,22 @@ class IgdbSyncNotifier extends StateNotifier<IgdbSyncState> {
     );
   }
 
-  /// Merges a score list into this device. Download history is left alone.
   Future<int> importTransfer(String source) async {
     final transfer = parseIgdbTransfer(source);
-    await _db.upsertMobyScores([
-      for (final row in transfer.scores) row.toDbRow(),
-    ]);
-    final local = await _db.mobySyncStates();
-    final merged = mergeIgdbSync(
-      local: [
-        for (final entry in local.entries)
-          IgdbSyncRow(
-            platform: entry.key,
-            pageOffset: entry.value.offset,
-            complete: entry.value.complete,
-            cutoff: entry.value.cutoff,
-          ),
-      ],
-      imported: transfer.sync,
+    await _db.importIgdbCatalog(
+      games: [for (final row in transfer.games) row.toGameDbRow()],
+      titleKeys: [for (final row in transfer.titleKeys) row.toDbRow()],
     );
-    for (final row in merged) {
+    for (final row in transfer.sync) {
       await _db.setMobySync(
         platform: row.platform,
         offset: row.pageOffset,
         complete: row.complete,
-        cutoff: row.cutoff,
+        cutoff: 0,
       );
     }
     await _load(clearError: true);
-    return transfer.scores.length;
+    return transfer.games.length;
   }
 }
 

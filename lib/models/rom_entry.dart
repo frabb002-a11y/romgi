@@ -1,4 +1,5 @@
 import 'download_link.dart';
+import 'igdb_catalog_entry.dart';
 
 class RomEntry {
   final String slug;
@@ -66,6 +67,7 @@ class RomEntry {
 
 class SearchResult {
   final List<RomEntry> entries;
+  final List<IgdbCatalogEntry>? igdbGaps;
   final int totalResults;
   final int currentPage;
   final int totalPages;
@@ -73,11 +75,23 @@ class SearchResult {
 
   const SearchResult({
     required this.entries,
+    this.igdbGaps,
     required this.totalResults,
     required this.currentPage,
     required this.totalPages,
     required this.currentResults,
   });
+
+  bool get showingIgdbGaps => igdbGaps != null && entries.isEmpty;
+
+  factory SearchResult.empty({required int page}) => SearchResult(
+    entries: const [],
+    igdbGaps: const [],
+    totalResults: 0,
+    currentPage: page,
+    totalPages: 1,
+    currentResults: 0,
+  );
 
   bool get hasMore => currentPage < totalPages;
 
