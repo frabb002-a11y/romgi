@@ -3,7 +3,7 @@ import 'package:romgi/services/metadata/igdb_catalog_index.dart';
 import 'package:romgi/services/metadata/igdb_ranking.dart';
 
 void main() {
-  const index = IgdbCatalogIndex(
+  final index = IgdbCatalogIndex(
     gamesByPlatform: {
       'nds': {
         1: IgdbGameRecord(
