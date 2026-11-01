@@ -63,10 +63,9 @@ class _IgdbSettingsSectionState extends ConsumerState<IgdbSettingsSection> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: Text(
-            'Builds a local critic-score list from IGDB. Setup asks which '
-            'consoles to include, optional genres, and the lowest score to keep. '
-            'Browse only filters platforms that have finished Setup. Export '
-            'the score list to move it onto another device.',
+            'Syncs the full IGDB rated pool per console (user scores + votes). '
+            'Use Browse filters for minimum score, votes, catalog gaps, and '
+            'discovery. Export moves the cached pool to another device.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
@@ -188,9 +187,8 @@ class _IgdbSettingsSectionState extends ConsumerState<IgdbSettingsSection> {
             title: Text(_platformName(catalog, entry.key)),
             subtitle: Text(
               entry.value.complete
-                  ? 'Finished · ${entry.value.stored} titles · stop at '
-                      '${entry.value.cutoff <= 0 ? 'any score' : entry.value.cutoff.toStringAsFixed(0)}'
-                  : 'Stopped · ${entry.value.stored} titles',
+                  ? 'Finished · ${entry.value.stored} IGDB titles'
+                  : 'Stopped · ${entry.value.stored} titles synced',
             ),
           ),
       ],
@@ -215,30 +213,26 @@ class _IgdbSettingsSectionState extends ConsumerState<IgdbSettingsSection> {
       return;
     }
     if (!mounted) return;
-    final cutoff = ref.read(settingsProvider).igdbStopScore;
     final result = await showModalBottomSheet<_IgdbSetupRequest>(
       context: context,
       isScrollControlled: true,
       builder: (context) => _IgdbSetupSheet(
         catalog: catalog,
         genres: genres,
-        cutoff: cutoff,
       ),
     );
     if (result == null || !mounted) return;
-    await ref.read(settingsProvider.notifier).setIgdbStopScore(result.cutoff);
     await ref.read(igdbSyncProvider.notifier).runSetup(
       platforms: result.platforms,
       genreIds: result.genreIds,
-      cutoff: result.cutoff,
     );
   }
 
   Future<void> _exportScores() async {
     final transfer = await ref.read(igdbSyncProvider.notifier).exportTransfer();
     if (!mounted) return;
-    if (transfer.scores.isEmpty && transfer.sync.isEmpty) {
-      _tell('No IGDB scores to export.');
+    if (transfer.games.isEmpty && transfer.sync.isEmpty) {
+      _tell('No IGDB catalog to export.');
       return;
     }
     final path = await FilePicker.platform.saveFile(
@@ -247,7 +241,7 @@ class _IgdbSettingsSectionState extends ConsumerState<IgdbSettingsSection> {
       bytes: Uint8List.fromList(utf8.encode(encodeIgdbTransfer(transfer))),
     );
     if (!mounted || path == null) return;
-    _tell('Exported ${transfer.scores.length} scores.');
+    _tell('Exported ${transfer.games.length} IGDB titles.');
   }
 
   Future<void> _importScores() async {
@@ -290,24 +284,20 @@ class _IgdbSettingsSectionState extends ConsumerState<IgdbSettingsSection> {
 class _IgdbSetupRequest {
   final List<String> platforms;
   final List<int> genreIds;
-  final double cutoff;
 
   const _IgdbSetupRequest({
     required this.platforms,
     required this.genreIds,
-    required this.cutoff,
   });
 }
 
 class _IgdbSetupSheet extends StatefulWidget {
   final List<Platform> catalog;
   final List<IgdbGenre> genres;
-  final double cutoff;
 
   const _IgdbSetupSheet({
     required this.catalog,
     required this.genres,
-    required this.cutoff,
   });
 
   @override
@@ -318,12 +308,10 @@ class _IgdbSetupSheetState extends State<_IgdbSetupSheet> {
   final _checked = <String>{};
   final _genres = <int>{};
   var _query = '';
-  late double _cutoff;
 
   @override
   void initState() {
     super.initState();
-    _cutoff = widget.cutoff.clamp(0, 100);
   }
 
   List<Platform> get _platforms {
@@ -373,7 +361,6 @@ class _IgdbSetupSheetState extends State<_IgdbSetupSheet> {
                                       platform.id,
                                 ],
                                 genreIds: _genres.toList(),
-                                cutoff: _cutoff,
                               ),
                             ),
                       child: const Text('Start'),
@@ -428,20 +415,12 @@ class _IgdbSetupSheetState extends State<_IgdbSetupSheet> {
                   padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
                       child: Text(
-                        _cutoff <= 0
-                            ? 'Keep every scored game'
-                            : 'Keep scores of ${_cutoff.toStringAsFixed(0)} and up',
+                        'Syncs every rated IGDB game on each console. '
+                        'Score and vote filters live under Browse → Filters.',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                    ),
-                    Slider(
-                      value: _cutoff,
-                      min: 0,
-                      max: 100,
-                      divisions: 20,
-                      label: _cutoff.toStringAsFixed(0),
-                      onChanged: (value) => setState(() => _cutoff = value),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),

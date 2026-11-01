@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../models/models.dart';
+import 'metadata/moby_titles.dart';
 
 /// Catalog schema this build expects. Mirror of
 /// db/database/db_manager.py:SCHEMA_VERSION. On mismatch the local DB
@@ -434,6 +435,30 @@ class RomDatabaseService {
 
   /// Every match for the current filters, without download links.
   /// Used when a score filter has to see the whole set before paging.
+  /// Normalized title keys for every catalog row on each platform (for IGDB matching).
+  Future<Map<String, Set<String>>> catalogTitleKeysByPlatform({
+    List<String>? platforms,
+  }) async {
+    final db = await database;
+    final clause = platforms == null || platforms.isEmpty
+        ? ''
+        : 'WHERE e.platform IN (${List.filled(platforms.length, '?').join(',')})';
+    final rows = await db.rawQuery(
+      'SELECT DISTINCT e.title, e.platform FROM entries e $clause',
+      platforms ?? [],
+    );
+    final out = <String, Set<String>>{};
+    for (final row in rows) {
+      final platform = row['platform'] as String?;
+      final title = row['title'] as String?;
+      if (platform == null || title == null) continue;
+      final key = mobyTitleKey(title);
+      if (key.isEmpty) continue;
+      out.putIfAbsent(platform, () => {}).add(key);
+    }
+    return out;
+  }
+
   Future<List<RomEntry>> listMatches({
     String? query,
     List<String>? platforms,

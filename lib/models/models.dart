@@ -4,6 +4,7 @@ export 'download_task.dart';
 export 'entry_group.dart';
 export 'favorite.dart';
 export 'game_metadata.dart';
+export 'igdb_catalog_entry.dart';
 export 'library_entry.dart';
 export 'platform.dart';
 export 'recently_viewed.dart';

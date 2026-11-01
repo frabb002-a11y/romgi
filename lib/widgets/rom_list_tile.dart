@@ -11,7 +11,7 @@ class RomListTile extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool isDownloaded;
   final bool selected;
-  final double? score;
+  final int? igdbRank;
 
   const RomListTile({
     super.key,
@@ -20,7 +20,7 @@ class RomListTile extends StatelessWidget {
     this.onLongPress,
     this.isDownloaded = false,
     this.selected = false,
-    this.score,
+    this.igdbRank,
   });
 
   @override
@@ -87,10 +87,10 @@ class RomListTile extends StatelessWidget {
               RegionUtils.getFlags(entry.regions),
               style: const TextStyle(fontSize: 14),
             ),
-          if (score != null) ...[
+          if (igdbRank != null) ...[
             const SizedBox(width: 4),
             Text(
-              score!.toStringAsFixed(1),
+              '#$igdbRank',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,

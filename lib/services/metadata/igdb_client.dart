@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import 'igdb_ranking.dart';
+
 class IgdbException implements Exception {
   final String message;
 
@@ -16,37 +18,45 @@ class IgdbGenre {
   const IgdbGenre({required this.id, required this.name});
 }
 
-class IgdbListedGame {
+class IgdbPoolGame {
   final int id;
   final String name;
-  final double score;
+  final double rating;
+  final int ratingCount;
+  final double weighted;
+  final int gameType;
   final List<String> alternativeNames;
 
-  const IgdbListedGame({
+  const IgdbPoolGame({
     required this.id,
     required this.name,
-    required this.score,
+    required this.rating,
+    required this.ratingCount,
+    required this.weighted,
+    required this.gameType,
     this.alternativeNames = const [],
   });
 }
 
-String igdbGamesQuery({
+/// Fetches the eligible IGDB pool (no score cutoff — filter downstream in the app).
+String igdbPoolQuery({
   required int platformId,
   required List<int> genreIds,
-  required double minimumScore,
   required int offset,
 }) {
-  final score = minimumScore <= 0
-      ? 'aggregated_rating != null'
-      : 'aggregated_rating >= ${minimumScore.toStringAsFixed(0)}';
   final genres = genreIds.isEmpty
       ? ''
       : ' & genres = (${genreIds.join(',')})';
-  return 'fields name,aggregated_rating,alternative_names.name;'
-      ' where platforms = ($platformId) & category = 0 & $score$genres;'
-      ' sort aggregated_rating desc;'
+  return 'fields id,name,rating,rating_count,game_type,alternative_names.name;'
+      ' where platforms = [$platformId] & rating_count > 0 & version_parent = null'
+      ' & (game_type = 0 | game_type = 3)$genres;'
+      ' sort id asc;'
       ' limit 500;'
       ' offset $offset;';
+}
+
+String igdbReleaseDatesQuery(List<int> gameIds) {
+  return 'fields id,release_dates.platform; where id = (${gameIds.join(',')});';
 }
 
 List<IgdbGenre> parseIgdbGenres(Object? body) {
@@ -63,26 +73,57 @@ List<IgdbGenre> parseIgdbGenres(Object? body) {
   return genres;
 }
 
-List<IgdbListedGame> parseIgdbGames(Object? body) {
+List<IgdbPoolGame> parseIgdbPoolGames(Object? body) {
   if (body is! List) return const [];
-  final games = <IgdbListedGame>[];
+  final games = <IgdbPoolGame>[];
   for (final item in body) {
     if (item is! Map) continue;
     final id = item['id'];
     final name = item['name'];
-    final score = item['aggregated_rating'];
+    final rating = item['rating'];
+    final ratingCount = item['rating_count'];
+    final gameType = item['game_type'];
     if (id is! int || name is! String || name.trim().isEmpty) continue;
-    if (score is! num) continue;
+    if (rating is! num || ratingCount is! int) continue;
+    final r = rating.toDouble();
+    final w = igdbWeightedRating(r, ratingCount);
     games.add(
-      IgdbListedGame(
+      IgdbPoolGame(
         id: id,
         name: name.trim(),
-        score: score.toDouble(),
+        rating: r,
+        ratingCount: ratingCount,
+        weighted: w,
+        gameType: gameType is int ? gameType : 0,
         alternativeNames: _alternativeNames(item['alternative_names']),
       ),
     );
   }
   return games;
+}
+
+Map<int, bool> parseReleaseOnPlatform(Object? body, int platformId) {
+  final out = <int, bool>{};
+  if (body is! List) return out;
+  for (final item in body) {
+    if (item is! Map) continue;
+    final id = item['id'];
+    if (id is! int) continue;
+    var onPlatform = false;
+    final dates = item['release_dates'];
+    if (dates is List) {
+      for (final row in dates) {
+        if (row is! Map) continue;
+        final p = row['platform'];
+        if (p is int && p == platformId) {
+          onPlatform = true;
+          break;
+        }
+      }
+    }
+    out[id] = onPlatform;
+  }
+  return out;
 }
 
 List<String> _alternativeNames(Object? raw) {
@@ -119,28 +160,52 @@ class IgdbClient {
     return parseIgdbGenres(body);
   }
 
-  Future<List<IgdbListedGame>> games({
+  Future<List<IgdbPoolGame>> poolPage({
     required String clientId,
     required String clientSecret,
     required int platformId,
     required List<int> genreIds,
-    required double minimumScore,
     required int offset,
     CancelToken? cancelToken,
   }) async {
     final body = await _post(
       'https://api.igdb.com/v4/games',
-      igdbGamesQuery(
+      igdbPoolQuery(
         platformId: platformId,
         genreIds: genreIds,
-        minimumScore: minimumScore,
         offset: offset,
       ),
       clientId: clientId,
       clientSecret: clientSecret,
       cancelToken: cancelToken,
     );
-    return parseIgdbGames(body);
+    return parseIgdbPoolGames(body);
+  }
+
+  Future<Map<int, bool>> releaseOnPlatform({
+    required String clientId,
+    required String clientSecret,
+    required int platformId,
+    required List<int> gameIds,
+    CancelToken? cancelToken,
+  }) async {
+    if (gameIds.isEmpty) return {};
+    final merged = <int, bool>{};
+    for (var i = 0; i < gameIds.length; i += 80) {
+      final chunk = gameIds.sublist(
+        i,
+        i + 80 > gameIds.length ? gameIds.length : i + 80,
+      );
+      final body = await _post(
+        'https://api.igdb.com/v4/games',
+        igdbReleaseDatesQuery(chunk),
+        clientId: clientId,
+        clientSecret: clientSecret,
+        cancelToken: cancelToken,
+      );
+      merged.addAll(parseReleaseOnPlatform(body, platformId));
+    }
+    return merged;
   }
 
   Future<Object?> _post(

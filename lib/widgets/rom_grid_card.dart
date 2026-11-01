@@ -11,7 +11,7 @@ class RomGridCard extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool isDownloaded;
   final bool selected;
-  final double? score;
+  final int? igdbRank;
 
   const RomGridCard({
     super.key,
@@ -20,7 +20,7 @@ class RomGridCard extends StatelessWidget {
     this.onLongPress,
     this.isDownloaded = false,
     this.selected = false,
-    this.score,
+    this.igdbRank,
   });
 
   @override
@@ -103,7 +103,7 @@ class RomGridCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                  if (score != null)
+                  if (igdbRank != null)
                     Positioned(
                       bottom: 4,
                       left: 4,
@@ -117,7 +117,7 @@ class RomGridCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          score!.toStringAsFixed(1),
+                          '#$igdbRank',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 10,

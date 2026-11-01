@@ -277,6 +277,8 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
         searchState.selectedRegions.length +
         (searchState.retroAchievementsOnly ? 1 : 0) +
         (searchState.scoreOnly ? 1 : 0) +
+        (searchState.showPrunedOnly ? 1 : 0) +
+        (searchState.igdbGapsOnly ? 1 : 0) +
         (searchState.oneGameOneRom ? 1 : 0) +
         (excludeTerms.isNotEmpty ? 1 : 0);
     final selecting = searchState.selection.active;
@@ -379,19 +381,30 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
                           ),
                         ),
                       ),
-                      if (searchState.scoreOnly)
+                      if (searchState.showPrunedOnly)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Chip(
+                            label: const Text('Pruned list'),
+                            onDeleted: () {
+                              ref.read(searchProvider.notifier)
+                                ..setShowPrunedOnly(false)
+                                ..search();
+                            },
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      if (searchState.minimumScore > 0 || searchState.minIgdbVotes > 5)
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: Chip(
                             label: Text(
-                              searchState.minimumScore <= 0
-                                  ? 'Has IGDB score'
-                                  : 'Score ${searchState.minimumScore.toStringAsFixed(0)}+',
+                              'IGDB ≥${searchState.minimumScore.toStringAsFixed(0)} · ${searchState.minIgdbVotes}+ votes',
                             ),
                             onDeleted: () {
                               ref.read(searchProvider.notifier)
-                                ..setScoreOnly(false)
                                 ..setMinimumScore(0)
+                                ..setMinIgdbVotes(5)
                                 ..search();
                             },
                             visualDensity: VisualDensity.compact,
@@ -491,7 +504,24 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
       return _buildRecentlyViewedSection();
     }
 
-    final entries = searchState.result?.entries ?? [];
+    final result = searchState.result;
+    if (result != null &&
+        result.showingIgdbGaps &&
+        searchState.igdbGapsOnly) {
+      final gaps = result.igdbGaps ?? [];
+      if (gaps.isEmpty) {
+        return SliverFillRemaining(
+          child: Center(
+            child: Text(
+              'No unmatched IGDB titles for this platform',
+            ),
+          ),
+        );
+      }
+      return _buildIgdbGapsList(gaps, searchState);
+    }
+
+    final entries = result?.entries ?? [];
 
     if (entries.isEmpty) {
       return SliverFillRemaining(
@@ -505,6 +535,8 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
               if (searchState.selectedPlatforms.isNotEmpty ||
                   searchState.selectedRegions.isNotEmpty ||
                   searchState.scoreOnly ||
+                  searchState.showPrunedOnly ||
+                  searchState.igdbGapsOnly ||
                   searchState.oneGameOneRom ||
                   searchState.retroAchievementsOnly) ...[
                 const SizedBox(height: 8),
@@ -531,7 +563,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
   Widget _buildSliverList(List entries, SearchState searchState) {
     final downloadedSlugs = ref.watch(downloadedSlugsProvider);
     final downloadedSet = downloadedSlugs.valueOrNull ?? <String>{};
-    final scores = ref.watch(igdbSyncProvider.select((sync) => sync.index));
+    final ranks = searchState.result?.igdbRanks ?? const {};
 
     return SliverList(
       delegate: SliverChildBuilderDelegate((context, index) {
@@ -551,7 +583,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
               entry: entry,
               isDownloaded: downloadedSet.contains(entry.slug),
               selected: searchState.selection.contains(entry.slug),
-              score: scores.lookup(entry.platform, entry.title),
+              igdbRank: ranks[entry.slug],
               onTap: () => _onEntryTap(entry.slug),
               onLongPress: () => _onEntryLongPress(entry.slug),
             ),
@@ -562,10 +594,48 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
     );
   }
 
+  Widget _buildIgdbGapsList(
+    List<IgdbCatalogEntry> gaps,
+    SearchState searchState,
+  ) {
+    return SliverList(
+      delegate: SliverChildBuilderDelegate((context, index) {
+        if (index >= gaps.length) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+        final item = gaps[index];
+        return Column(
+          children: [
+            ListTile(
+              leading: CircleAvatar(
+                child: Text('${index + 1}', style: const TextStyle(fontSize: 12)),
+              ),
+              title: Text(item.name),
+              subtitle: Text(
+                '${PlatformNames.getDisplayName(item.platform)} · '
+                '${item.ratingCount} ratings · not in Romgi catalog',
+              ),
+              trailing: Text(
+                item.displayScore.toStringAsFixed(1),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            if (index < gaps.length - 1) const Divider(height: 1),
+          ],
+        );
+      }, childCount: gaps.length + (searchState.result!.hasMore ? 1 : 0)),
+    );
+  }
+
   Widget _buildSliverGrid(List entries, SearchState searchState) {
     final downloadedSlugs = ref.watch(downloadedSlugsProvider);
     final downloadedSet = downloadedSlugs.valueOrNull ?? <String>{};
-    final scores = ref.watch(igdbSyncProvider.select((sync) => sync.index));
+    final ranks = searchState.result?.igdbRanks ?? const {};
 
     // Get screen width to calculate columns
     final screenWidth = MediaQuery.of(context).size.width;
@@ -592,7 +662,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
             entry: entry,
             isDownloaded: downloadedSet.contains(entry.slug),
             selected: searchState.selection.contains(entry.slug),
-            score: scores.lookup(entry.platform, entry.title),
+            igdbRank: ranks[entry.slug],
             onTap: () => _onEntryTap(entry.slug),
             onLongPress: () => _onEntryLongPress(entry.slug),
           );

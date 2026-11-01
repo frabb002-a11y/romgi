@@ -18,6 +18,9 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
   late bool _retroAchievementsOnly;
   late bool _scoreOnly;
   late double _minimumScore;
+  late int _minIgdbVotes;
+  late bool _igdbGapsOnly;
+  late bool _showPrunedOnly;
   late bool _oneGameOneRom;
   late List<String> _excludeTerms;
   final _termController = TextEditingController();
@@ -32,6 +35,9 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
     _retroAchievementsOnly = searchState.retroAchievementsOnly;
     _scoreOnly = searchState.scoreOnly;
     _minimumScore = searchState.minimumScore;
+    _minIgdbVotes = searchState.minIgdbVotes;
+    _igdbGapsOnly = searchState.igdbGapsOnly;
+    _showPrunedOnly = searchState.showPrunedOnly;
     _oneGameOneRom = searchState.oneGameOneRom;
     _excludeTerms = List.of(ref.read(settingsProvider).excludeTerms);
   }
@@ -97,7 +103,10 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                           _selectedRegions.clear();
                           _retroAchievementsOnly = false;
                           _scoreOnly = false;
-                          _minimumScore = 0;
+                          _minimumScore = 60;
+                          _minIgdbVotes = 10;
+                          _igdbGapsOnly = false;
+                          _showPrunedOnly = false;
                           _oneGameOneRom = false;
                         });
                       },
@@ -178,26 +187,36 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                     const SizedBox(height: 24),
 
                     Text(
-                      'IGDB score',
+                      'IGDB (downstream)',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Only platforms finished in IGDB Setup are filtered. '
-                      'The rest stay in the results.',
+                      'After IGDB Setup, Browse sorts by rank (#1 highest). '
+                      'Score and vote sliders only hide titles; rank numbers stay fixed. '
+                      'Use Pruned to see what the floors removed, then select and download.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Has a score'),
+                      title: const Text('Pruned list'),
+                      subtitle: const Text(
+                        'ROMs with an IGDB match that fail score/vote floors',
+                      ),
+                      value: _showPrunedOnly,
+                      onChanged: (value) => setState(() {
+                        _showPrunedOnly = value;
+                        if (value) _igdbGapsOnly = false;
+                      }),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Legacy: require IGDB match (no rank sort)'),
                       value: _scoreOnly,
-                      onChanged: (value) =>
-                          setState(() => _scoreOnly = value),
+                      onChanged: (value) => setState(() => _scoreOnly = value),
                     ),
                     Text(
-                      _minimumScore <= 0
-                          ? 'Any score'
-                          : 'At least ${_minimumScore.toStringAsFixed(0)}',
+                      'Min user score (0–100): ${_minimumScore.toStringAsFixed(0)}',
                     ),
                     Slider(
                       value: _minimumScore,
@@ -205,9 +224,29 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                       max: 100,
                       divisions: 20,
                       label: _minimumScore.toStringAsFixed(0),
-                      onChanged: _scoreOnly
-                          ? (value) => setState(() => _minimumScore = value)
-                          : null,
+                      onChanged: (value) => setState(() => _minimumScore = value),
+                    ),
+                    Text('Min votes: $_minIgdbVotes'),
+                    Slider(
+                      value: _minIgdbVotes.toDouble(),
+                      min: 5,
+                      max: 20,
+                      divisions: 15,
+                      label: '$_minIgdbVotes',
+                      onChanged: (value) =>
+                          setState(() => _minIgdbVotes = value.round()),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('IGDB gaps (no ROM in catalog)'),
+                      subtitle: const Text(
+                        'Rated on IGDB but no matching Romgi title',
+                      ),
+                      value: _igdbGapsOnly,
+                      onChanged: (value) => setState(() {
+                        _igdbGapsOnly = value;
+                        if (value) _showPrunedOnly = false;
+                      }),
                     ),
 
                     const SizedBox(height: 24),
@@ -317,6 +356,9 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                           ..setRetroAchievementsOnly(_retroAchievementsOnly)
                           ..setScoreOnly(_scoreOnly)
                           ..setMinimumScore(_minimumScore)
+                          ..setMinIgdbVotes(_minIgdbVotes)
+                          ..setIgdbGapsOnly(_igdbGapsOnly)
+                          ..setShowPrunedOnly(_showPrunedOnly)
                           ..setOneGameOneRom(_oneGameOneRom)
                           ..search();
                         Navigator.pop(context);

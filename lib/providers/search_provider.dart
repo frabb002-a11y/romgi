@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
-import '../services/metadata/score_index.dart';
+import '../services/metadata/igdb_catalog_index.dart';
+import '../services/metadata/igdb_platforms.dart';
+import '../services/metadata/igdb_ranked_browse.dart';
 import '../services/rom_database_service.dart';
 import '../utils/rom_pick.dart';
 import 'api_provider.dart';
@@ -15,6 +17,9 @@ class SearchState {
   final bool retroAchievementsOnly;
   final bool scoreOnly;
   final double minimumScore;
+  final int minIgdbVotes;
+  final bool showPrunedOnly;
+  final bool igdbGapsOnly;
   final bool oneGameOneRom;
   final SearchResult? result;
   final bool isLoading;
@@ -27,7 +32,10 @@ class SearchState {
     this.selectedRegions = const [],
     this.retroAchievementsOnly = false,
     this.scoreOnly = false,
-    this.minimumScore = 0,
+    this.minimumScore = 60,
+    this.minIgdbVotes = 10,
+    this.showPrunedOnly = false,
+    this.igdbGapsOnly = false,
     this.oneGameOneRom = false,
     this.result,
     this.isLoading = false,
@@ -37,6 +45,11 @@ class SearchState {
 
   int get selectedCount => selection.count(result?.totalResults ?? 0);
 
+  IgdbDownstreamFilters get igdbFilters => IgdbDownstreamFilters(
+    minUserRating: minimumScore <= 0 ? 0 : minimumScore,
+    minVotes: minIgdbVotes,
+  );
+
   SearchState copyWith({
     String? query,
     List<String>? selectedPlatforms,
@@ -44,6 +57,9 @@ class SearchState {
     bool? retroAchievementsOnly,
     bool? scoreOnly,
     double? minimumScore,
+    int? minIgdbVotes,
+    bool? showPrunedOnly,
+    bool? igdbGapsOnly,
     bool? oneGameOneRom,
     SearchResult? result,
     bool clearResult = false,
@@ -60,6 +76,9 @@ class SearchState {
           retroAchievementsOnly ?? this.retroAchievementsOnly,
       scoreOnly: scoreOnly ?? this.scoreOnly,
       minimumScore: minimumScore ?? this.minimumScore,
+      minIgdbVotes: minIgdbVotes ?? this.minIgdbVotes,
+      showPrunedOnly: showPrunedOnly ?? this.showPrunedOnly,
+      igdbGapsOnly: igdbGapsOnly ?? this.igdbGapsOnly,
       oneGameOneRom: oneGameOneRom ?? this.oneGameOneRom,
       result: clearResult ? null : (result ?? this.result),
       isLoading: isLoading ?? this.isLoading,
@@ -71,20 +90,39 @@ class SearchState {
 
 class SearchNotifier extends StateNotifier<SearchState> {
   final RomDatabaseService _db;
-  final ScoreIndex Function() _index;
+  final IgdbCatalogIndex Function() _index;
   final List<String> Function() _excludeTerms;
   List<RomEntry>? _filteredAll;
+  Map<String, int> _igdbRanks = {};
+  List<IgdbCatalogEntry>? _filteredIgdb;
+  Map<String, Set<String>>? _catalogKeys;
   int _request = 0;
 
   SearchNotifier(this._db, this._index, this._excludeTerms)
     : super(const SearchState());
 
+  bool _usesIgdbRankedBrowse() {
+    if (state.igdbGapsOnly) return false;
+    return igdbRankedBrowseAvailable(
+      _index(),
+      romgiPlatforms: state.selectedPlatforms.isEmpty
+          ? null
+          : state.selectedPlatforms,
+    );
+  }
+
   bool get _usesLocalList =>
-      state.scoreOnly || state.oneGameOneRom || _excludeTerms().isNotEmpty;
+      _usesIgdbRankedBrowse() ||
+      state.scoreOnly ||
+      state.oneGameOneRom ||
+      _excludeTerms().isNotEmpty;
 
   Future<void> search({String? query}) async {
     final request = ++_request;
     _filteredAll = null;
+    _igdbRanks = {};
+    _filteredIgdb = null;
+    _catalogKeys = null;
     state = state.copyWith(
       query: query ?? state.query,
       isLoading: true,
@@ -116,14 +154,18 @@ class SearchNotifier extends StateNotifier<SearchState> {
       final nextPage = currentResult.currentPage + 1;
       final result = await _load(page: nextPage, request: request);
       if (request != _request) return;
-      final combinedEntries = [...currentResult.entries, ...result.entries];
       state = state.copyWith(
         result: SearchResult(
-          entries: combinedEntries,
+          entries: [...currentResult.entries, ...result.entries],
+          igdbGaps: [
+            ...?currentResult.igdbGaps,
+            ...?result.igdbGaps,
+          ],
+          igdbRanks: {...currentResult.igdbRanks, ...result.igdbRanks},
           totalResults: result.totalResults,
           currentPage: result.currentPage,
           totalPages: result.totalPages,
-          currentResults: combinedEntries.length,
+          currentResults: currentResult.entries.length + result.entries.length,
         ),
         isLoading: false,
       );
@@ -135,6 +177,31 @@ class SearchNotifier extends StateNotifier<SearchState> {
 
   Future<SearchResult> _load({required int page, required int request}) async {
     const pageSize = 100;
+
+    if (state.igdbGapsOnly) {
+      if (_filteredIgdb == null) {
+        _filteredIgdb = await _buildIgdbGapsList();
+        if (request != _request) {
+          return SearchResult.empty(page: page);
+        }
+      }
+      final all = _filteredIgdb!;
+      final start = (page - 1) * pageSize;
+      final end = start + pageSize;
+      final slice = start >= all.length
+          ? const <IgdbCatalogEntry>[]
+          : all.sublist(start, end > all.length ? all.length : end);
+      final totalPages = all.isEmpty ? 1 : (all.length / pageSize).ceil();
+      return SearchResult(
+        entries: const [],
+        igdbGaps: slice,
+        totalResults: all.length,
+        currentPage: page,
+        totalPages: totalPages,
+        currentResults: slice.length,
+      );
+    }
+
     if (!_usesLocalList) {
       if (request == _request) _filteredAll = null;
       return _db.search(
@@ -152,15 +219,9 @@ class SearchNotifier extends StateNotifier<SearchState> {
     if (_filteredAll == null) {
       final matches = await _listedMatches();
       if (request != _request) {
-        return SearchResult(
-          entries: const [],
-          totalResults: 0,
-          currentPage: page,
-          totalPages: 1,
-          currentResults: 0,
-        );
+        return SearchResult.empty(page: page);
       }
-      _filteredAll = _narrow(matches);
+      _filteredAll = await _buildLocalList(matches);
     }
     final all = _filteredAll!;
     final start = (page - 1) * pageSize;
@@ -171,11 +232,91 @@ class SearchNotifier extends StateNotifier<SearchState> {
     final totalPages = all.isEmpty ? 1 : (all.length / pageSize).ceil();
     return SearchResult(
       entries: slice,
+      igdbRanks: _igdbRanks,
       totalResults: all.length,
       currentPage: page,
       totalPages: totalPages,
       currentResults: slice.length,
     );
+  }
+
+  Future<List<RomEntry>> _buildLocalList(List<RomEntry> matches) async {
+    var list = matches;
+    final terms = _excludeTerms();
+    if (terms.isNotEmpty) {
+      list = list.where((entry) => !titleExcluded(entry.title, terms)).toList();
+    }
+    if (state.oneGameOneRom) {
+      list = pickOnePerGame(list);
+    }
+
+    if (_usesIgdbRankedBrowse()) {
+      final minDisplay =
+          state.minimumScore <= 0 ? null : state.minimumScore / 10;
+      final ranked = buildIgdbRankedBrowse(
+        entries: list,
+        index: _index(),
+        filters: state.igdbFilters,
+        minimumDisplayScore: minDisplay,
+      );
+      _igdbRanks = ranked.ranks;
+      return state.showPrunedOnly ? ranked.pruned : ranked.main;
+    }
+
+    if (state.scoreOnly) {
+      list = _applyLegacyScoreFilter(list);
+    }
+    return list;
+  }
+
+  List<RomEntry> _applyLegacyScoreFilter(List<RomEntry> entries) {
+    final index = _index();
+    final filters = state.igdbFilters;
+    final minDisplay = state.minimumScore <= 0 ? null : state.minimumScore / 10;
+    return entries
+        .where(
+          (entry) => index.keepRomEntry(
+            entry.platform,
+            entry.title,
+            filters: filters,
+            minimumDisplayScore: minDisplay,
+          ),
+        )
+        .toList();
+  }
+
+  Future<List<IgdbCatalogEntry>> _buildIgdbGapsList() async {
+    final index = _index();
+    final platforms = _igdbPlatformsForFilter();
+    if (platforms.isEmpty) return const [];
+
+    _catalogKeys ??= await _db.catalogTitleKeysByPlatform();
+
+    final igdbPlatforms = state.selectedPlatforms.isEmpty
+        ? _index().completePlatforms.toList()
+        : {
+            for (final p in platforms)
+              if (canonicalIgdbPlatform(p) != null) canonicalIgdbPlatform(p)!,
+          }.toList();
+
+    final catalogByIgdb = <String, Set<String>>{};
+    for (final entry in _catalogKeys!.entries) {
+      final canonical = canonicalIgdbPlatform(entry.key);
+      if (canonical == null) continue;
+      catalogByIgdb.putIfAbsent(canonical, () => {}).addAll(entry.value);
+    }
+
+    return index.unmatchedGaps(
+      igdbPlatforms: igdbPlatforms,
+      catalogKeysByPlatform: catalogByIgdb,
+      filters: state.igdbFilters,
+      query: state.query.isEmpty ? null : state.query,
+    );
+  }
+
+  List<String> _igdbPlatformsForFilter() {
+    if (state.selectedPlatforms.isNotEmpty) return state.selectedPlatforms;
+    return _index().completePlatforms.toList();
   }
 
   Future<List<RomEntry>> _listedMatches() {
@@ -189,31 +330,20 @@ class SearchNotifier extends StateNotifier<SearchState> {
     );
   }
 
-  List<RomEntry> _narrow(List<RomEntry> entries) {
-    final terms = _excludeTerms();
-    var list = entries;
-    if (terms.isNotEmpty) {
-      list = list.where((entry) => !titleExcluded(entry.title, terms)).toList();
-    }
-    if (state.scoreOnly) list = _applyScores(list);
-    if (state.oneGameOneRom) list = pickOnePerGame(list);
-    return list;
-  }
-
-  List<RomEntry> _applyScores(List<RomEntry> entries) {
-    final index = _index();
-    final minimum = state.minimumScore <= 0 ? null : state.minimumScore;
-    return entries
-        .where(
-          (entry) => index.keep(entry.platform, entry.title, minimum: minimum),
-        )
-        .toList();
+  void _invalidateListCache() {
+    _filteredAll = null;
+    _igdbRanks = {};
+    _filteredIgdb = null;
+    _catalogKeys = null;
   }
 
   void invalidateScoreFilter() {
-    if (!state.scoreOnly) return;
-    _filteredAll = null;
+    _invalidateListCache();
     if (state.result != null) search();
+  }
+
+  void invalidateIgdbViews() {
+    invalidateScoreFilter();
   }
 
   void invalidateExcludeTerms() {
@@ -227,8 +357,8 @@ class SearchNotifier extends StateNotifier<SearchState> {
     if (!selection.all) return selection.picked.toList();
     final all =
         _filteredAll ??
-        (_usesLocalList
-            ? _narrow(await _listedMatches())
+        (_usesLocalList && !state.igdbGapsOnly
+            ? await _buildLocalList(await _listedMatches())
             : await _listedMatches());
     final slugs = all.map((entry) => entry.slug);
     return slugs.where((slug) => !selection.excluded.contains(slug)).toList();
@@ -251,7 +381,7 @@ class SearchNotifier extends StateNotifier<SearchState> {
   }
 
   void setSelectedPlatforms(List<String> platforms) {
-    _filteredAll = null;
+    _invalidateListCache();
     state = state.copyWith(selectedPlatforms: platforms);
   }
 
@@ -266,13 +396,34 @@ class SearchNotifier extends StateNotifier<SearchState> {
   }
 
   void setScoreOnly(bool value) {
-    _filteredAll = null;
+    _invalidateListCache();
     state = state.copyWith(scoreOnly: value);
   }
 
   void setMinimumScore(double value) {
-    _filteredAll = null;
+    _invalidateListCache();
     state = state.copyWith(minimumScore: value);
+  }
+
+  void setMinIgdbVotes(int value) {
+    _invalidateListCache();
+    state = state.copyWith(minIgdbVotes: value);
+  }
+
+  void setShowPrunedOnly(bool value) {
+    _invalidateListCache();
+    state = state.copyWith(
+      showPrunedOnly: value,
+      igdbGapsOnly: value ? false : state.igdbGapsOnly,
+    );
+  }
+
+  void setIgdbGapsOnly(bool value) {
+    _invalidateListCache();
+    state = state.copyWith(
+      igdbGapsOnly: value,
+      showPrunedOnly: value ? false : state.showPrunedOnly,
+    );
   }
 
   void setOneGameOneRom(bool value) {
@@ -281,19 +432,22 @@ class SearchNotifier extends StateNotifier<SearchState> {
   }
 
   void clearFilters() {
-    _filteredAll = null;
+    _invalidateListCache();
     state = state.copyWith(
       selectedPlatforms: [],
       selectedRegions: [],
       retroAchievementsOnly: false,
       scoreOnly: false,
-      minimumScore: 0,
+      minimumScore: 60,
+      minIgdbVotes: 10,
+      showPrunedOnly: false,
+      igdbGapsOnly: false,
       oneGameOneRom: false,
     );
   }
 
   void reset() {
-    _filteredAll = null;
+    _invalidateListCache();
     state = const SearchState();
   }
 }
@@ -311,7 +465,7 @@ final searchProvider = StateNotifierProvider<SearchNotifier, SearchState>((
     previous,
     next,
   ) {
-    if (previous != next) notifier.invalidateScoreFilter();
+    if (previous != next) notifier.invalidateIgdbViews();
   });
   ref.listen(
     settingsProvider.select((settings) => settings.excludeTerms.join('\u0001')),
