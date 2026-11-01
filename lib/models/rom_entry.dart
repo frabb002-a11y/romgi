@@ -68,6 +68,7 @@ class RomEntry {
 class SearchResult {
   final List<RomEntry> entries;
   final List<IgdbCatalogEntry>? igdbGaps;
+  final Map<String, int> igdbRanks;
   final int totalResults;
   final int currentPage;
   final int totalPages;
@@ -76,6 +77,7 @@ class SearchResult {
   const SearchResult({
     required this.entries,
     this.igdbGaps,
+    this.igdbRanks = const {},
     required this.totalResults,
     required this.currentPage,
     required this.totalPages,
@@ -87,6 +89,7 @@ class SearchResult {
   factory SearchResult.empty({required int page}) => SearchResult(
     entries: const [],
     igdbGaps: const [],
+    igdbRanks: const {},
     totalResults: 0,
     currentPage: page,
     totalPages: 1,

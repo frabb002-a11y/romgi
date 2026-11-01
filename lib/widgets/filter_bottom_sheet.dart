@@ -20,8 +20,7 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
   late double _minimumScore;
   late int _minIgdbVotes;
   late bool _igdbGapsOnly;
-  late bool _igdbDiscoveryOnly;
-  late double _discoveryMinScore;
+  late bool _showPrunedOnly;
   late bool _oneGameOneRom;
   late List<String> _excludeTerms;
   final _termController = TextEditingController();
@@ -38,8 +37,7 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
     _minimumScore = searchState.minimumScore;
     _minIgdbVotes = searchState.minIgdbVotes;
     _igdbGapsOnly = searchState.igdbGapsOnly;
-    _igdbDiscoveryOnly = searchState.igdbDiscoveryOnly;
-    _discoveryMinScore = searchState.discoveryMinScore;
+    _showPrunedOnly = searchState.showPrunedOnly;
     _oneGameOneRom = searchState.oneGameOneRom;
     _excludeTerms = List.of(ref.read(settingsProvider).excludeTerms);
   }
@@ -108,8 +106,7 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                           _minimumScore = 60;
                           _minIgdbVotes = 10;
                           _igdbGapsOnly = false;
-                          _igdbDiscoveryOnly = false;
-                          _discoveryMinScore = 80;
+                          _showPrunedOnly = false;
                           _oneGameOneRom = false;
                         });
                       },
@@ -195,21 +192,28 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Setup syncs the full IGDB pool. These sliders apply when '
-                      'browsing. Only platforms finished in Setup are affected.',
+                      'After IGDB Setup, Browse sorts by rank (#1 highest). '
+                      'Score and vote sliders only hide titles; rank numbers stay fixed. '
+                      'Use Pruned to see what the floors removed, then select and download.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Romgi has IGDB match'),
-                      value: _scoreOnly,
+                      title: const Text('Pruned list'),
+                      subtitle: const Text(
+                        'ROMs with an IGDB match that fail score/vote floors',
+                      ),
+                      value: _showPrunedOnly,
                       onChanged: (value) => setState(() {
-                        _scoreOnly = value;
-                        if (value) {
-                          _igdbGapsOnly = false;
-                          _igdbDiscoveryOnly = false;
-                        }
+                        _showPrunedOnly = value;
+                        if (value) _igdbGapsOnly = false;
                       }),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Legacy: require IGDB match (no rank sort)'),
+                      value: _scoreOnly,
+                      onChanged: (value) => setState(() => _scoreOnly = value),
                     ),
                     Text(
                       'Min user score (0–100): ${_minimumScore.toStringAsFixed(0)}',
@@ -241,41 +245,9 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                       value: _igdbGapsOnly,
                       onChanged: (value) => setState(() {
                         _igdbGapsOnly = value;
-                        if (value) {
-                          _scoreOnly = false;
-                          _igdbDiscoveryOnly = false;
-                        }
+                        if (value) _showPrunedOnly = false;
                       }),
                     ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Discovery (in catalog, low votes)'),
-                      subtitle: const Text(
-                        'Matched ROMs IGDB would drop for low vote count',
-                      ),
-                      value: _igdbDiscoveryOnly,
-                      onChanged: (value) => setState(() {
-                        _igdbDiscoveryOnly = value;
-                        if (value) {
-                          _scoreOnly = false;
-                          _igdbGapsOnly = false;
-                        }
-                      }),
-                    ),
-                    if (_igdbDiscoveryOnly) ...[
-                      Text(
-                        'Discovery min score: ${_discoveryMinScore.toStringAsFixed(0)}',
-                      ),
-                      Slider(
-                        value: _discoveryMinScore,
-                        min: 70,
-                        max: 90,
-                        divisions: 20,
-                        label: _discoveryMinScore.toStringAsFixed(0),
-                        onChanged: (value) =>
-                            setState(() => _discoveryMinScore = value),
-                      ),
-                    ],
 
                     const SizedBox(height: 24),
 
@@ -386,8 +358,7 @@ class _FilterBottomSheetState extends ConsumerState<FilterBottomSheet> {
                           ..setMinimumScore(_minimumScore)
                           ..setMinIgdbVotes(_minIgdbVotes)
                           ..setIgdbGapsOnly(_igdbGapsOnly)
-                          ..setIgdbDiscoveryOnly(_igdbDiscoveryOnly)
-                          ..setDiscoveryMinScore(_discoveryMinScore)
+                          ..setShowPrunedOnly(_showPrunedOnly)
                           ..setOneGameOneRom(_oneGameOneRom)
                           ..search();
                         Navigator.pop(context);
